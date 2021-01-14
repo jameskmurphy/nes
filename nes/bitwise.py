@@ -2,6 +2,13 @@
 Some common bitwise manipulations.
 """
 
+
+def set_bit(target, bit):
+    return target | (1 << bit)
+
+def clear_bit(target, bit):
+    return target & ~(1 << bit)
+
 def bit_high(value, bit):
     """
     Returns whether the bit specified is set high in value?

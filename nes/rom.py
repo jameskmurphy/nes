@@ -56,8 +56,8 @@ class ROM:
         self.chr_rom_bytes = nesheader[5] * 8192  # in 8kB banks
 
         # header byte 6
-        self.mirror_pattern = NESVRAM.MIRROR_HORIZONTAL if nesheader[6] & self.MIRROR_MASK == 0 \
-            else NESVRAM.MIRROR_HORIZONTAL
+        self.mirror_pattern = NESVRAM.MIRROR_HORIZONTAL if (nesheader[6] & self.MIRROR_MASK) == 0 \
+            else NESVRAM.MIRROR_VERTICAL
         self.has_persistent = (nesheader[6] & self.PERSISTENT_MASK) > 0
         self.has_trainer = (nesheader[6] & self.TRAINER_MASK) > 0
         if (nesheader[6] & self.MIRROR_IGNORE_MASK) > 0:  # if this is set provide 4-page vram
@@ -94,9 +94,12 @@ class ROM:
             self.chr_ram_bytes = 64 << lower_nibble(nesheader[11])   #(nesheader[11] & 0b00001111)
             self.chr_nvram_bytes = 64 << upper_nibble(nesheader[11]) #((nesheader[11] & 0b11110000) >> 4)
 
-    def get_cart(self):
+    def get_cart(self, prg_start):
         if self.mapper_id == 0:
             return NESCart0(prg_rom_data=self.prg_rom_data,
                             chr_rom_data=self.chr_rom_data,
                             nametable_mirror_pattern=self.mirror_pattern,
+                            prg_start_addr=prg_start
                             )
+        else:
+            print("Mapper {} not currently supported".format(self.mapper_id))

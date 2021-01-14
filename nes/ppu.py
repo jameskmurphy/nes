@@ -1,5 +1,7 @@
+import logging
+
 from .memory import NESVRAM
-from .bitwise import bit_high
+from .bitwise import bit_high, set_bit, clear_bit
 
 class NESPPU:
     """
@@ -13,6 +15,8 @@ class NESPPU:
         [4] Detailed operation: http://nesdev.com/2C02%20technical%20operation.TXT
 
         [5] Palette generator: https://bisqwit.iki.fi/utils/nespalette.php
+
+        [6] Register behaviour: https://wiki.nesdev.com/w/index.php/PPU_registers
     """
     NUM_REGISTERS = 8
     OAM_SIZE_BYTES = 256
@@ -45,6 +49,10 @@ class NESPPU:
     RENDERING_ENABLED_MASK =    0b00011000
     RENDER_SPRITES_MASK =       0b00010000
     RENDER_BACKGROUND_MASK =    0b00001000
+
+    # bit numbers of some important bits in registers
+    # ppu_status
+    V_BLANK_BIT = 7             # same for ppu_ctrl
 
     # screen and sprite/tile sizes:
     PIXELS_PER_LINE = 341       # number of pixels per ppu scanline; only 256 of thes are visible
@@ -79,12 +87,11 @@ class NESPPU:
         (181, 223, 228), (169, 169, 169), (  0,   0,   0), (  0,   0,   0),
     ]
 
-    def __init__(self, cart=None, screen=None):
+    def __init__(self, cart=None, screen=None, interrupt_listener=None):
 
         # Registers
         self.ppu_ctrl = 0
         self.ppu_mask = 0
-        self.ppu_status = 0
         self.oam_addr = 0
         self._oam_addr_held = 0         # this holds the oam_addr value at a certain point in the frame, when it is fixed for the whole frame
         self.oam_data = 0
@@ -92,14 +99,12 @@ class NESPPU:
         self._ppu_scroll_ix = 0         # this is a double-write register, so keep track of which byte
         self.ppu_addr = 0               # the accumulated **16-bit** address
         self._ppu_addr_byte = 0         # this is a double-write register, so keep track of which byte
-        self.ppu_data = 0
-        self.oam_data = 0
 
-        # some things to make the registers work correctly
-        self.last_write = 0   # last write to the ppu, sometimes reflected in read statuses
+        # last write/valid read of the ppu registers, sometimes reflected in read statuses
+        self._io_latch = 0
 
         # internal statuses
-        self.in_vblank = True   # whether we are in vblank, reset on ppu_status read
+        self.in_vblank = False
         self.sprite_zero_hit = False
         self.sprite_overflow = False
 
@@ -115,6 +120,9 @@ class NESPPU:
 
         # screen attached to PPU
         self.screen = screen
+
+        # interrupt listener
+        self.interrupt_listener = interrupt_listener
 
         # palette: use the default, but can be replaced using utils.load_palette
         self.rgb_palette = self.DEFAULT_NES_PALETTE
@@ -142,44 +150,77 @@ class NESPPU:
                 # greys cannot be represented
                 trans_c = (trans_c[0]+1, trans_c[1]+1, trans_c[2]+1)
 
+    @property
+    def ppu_status(self):
+        """
+        The ppu status register value (without io latch noise in lower bits)
+        :return:
+        """
+        return (self.VBLANK_MASK * self.in_vblank
+         + self.SPRITE0_HIT_MASK * self.sprite_zero_hit
+         + self.SPRITE_OVERFLOW_MASK * self.sprite_overflow)
+
     def read_register(self, register):
         """
         Read the specified PPU register (and take the correct actions along with that)
         This is mostly (always?) triggered by the CPU reading memory mapped ram at 0x2000-0x3FFF
+        "Reading a nominally wrtie-only register will return the latch's current value" [6].
+        The "latch" here refers to the capacitance
+        of the PPU lines, which leads to some degree of "memory" on the lines, which will hold the last
+        value written to a port (including read only ones), or the last value read from a read-only port
         """
         if register == self.PPU_CTRL:
             # write only
-            pass
+            print("WARNING: reading i/o latch")
+            return self._io_latch
         elif register == self.PPU_MASK:
             # write only
-            pass
+            print("WARNING: reading i/o latch")
+            return self._io_latch
         elif register == self.PPU_STATUS:
+
             # clear ppu_scroll and ppu_addr latches
             self._ppu_addr_byte = 0
             self._ppu_scroll_ix = 0
-            vblank = self.in_vblank
-            self.in_vblank = False
-            return (  self.VBLANK_MASK * vblank
-                    + self.SPRITE0_HIT_MASK * self.sprite_zero_hit
-                    + self.SPRITE_OVERFLOW_MASK * self.sprite_overflow
-                    + 0x00011111 & self.last_write
-                      )
+            #vblank = self.in_vblank
+            #print(self.ppu_status, vblank)
+
+            #self.ppu_status &= ~self.VBLANK_MASK
+            #v = (  self.VBLANK_MASK * vblank
+            #     + self.SPRITE0_HIT_MASK * self.sprite_zero_hit
+            #     + self.SPRITE_OVERFLOW_MASK * self.sprite_overflow
+            #     + (0x00011111 & self._io_latch)
+            #     )
+            #print("ppu status", v)
+
+            v = self.ppu_status + (0x00011111 & self._io_latch)
+            self.in_vblank = False  # clear vblank in ppu_status
+
+
+            self._io_latch = v
+            return v
         elif register == self.OAM_ADDR:
             # write only
-            pass
+            print("WARNING: reading i/o latch")
+            return self._io_latch
         elif register == self.OAM_DATA:
             # todo: does not properly implement the weird results of this read during rendering
-            return self.oam[self.oam_addr]
+            v = self.oam[self.oam_addr]
+            self._io_latch = v
+            return v
         elif register == self.PPU_SCROLL:
             # write only
-            pass
+            print("WARNING: reading i/o latch")
+            return self._io_latch
         elif register == self.PPU_ADDR:
             # write only
-            pass
+            print("WARNING: reading i/o latch")
+            return self._io_latch
         elif register == self.PPU_DATA:
             # todo: PPUDATA read buffer (might be okay not to do this)
             v = self.vram.read(self.ppu_addr)
             self._increment_vram_address()
+            self._io_latch = v
             return v
 
     def write_register(self, register, value):
@@ -187,11 +228,18 @@ class NESPPU:
         Write one of the PPU registers with byte value and do whatever else that entails
         """
         # need to store the last write because it affects the value read on ppu_status
-        self.last_write = value & 0xFF
+        # "Writing any value to any PPU port, even to the nominally read-only PPUSTATUS, will fill this latch"  [6]
+
+        self._io_latch = value & 0xFF
+
+        #print("write ppu reg: {:02X} --> {} ".format(value, register))
 
         if register == self.PPU_CTRL:
             # write only
-            trigger_nmi = (value & self.VBLANK_MASK) > 0 and (self.ppu_ctrl & self.VBLANK_MASK) == 0
+            # can trigger an immediate NMI if we are in vblank and the (allow) vblank NMI trigger flag is flipped high
+            trigger_nmi = self.in_vblank \
+                          and (value & self.VBLANK_MASK) > 0 \
+                          and (self.ppu_ctrl & self.VBLANK_MASK) == 0
             self.ppu_ctrl = value & 0xFF
             if trigger_nmi:
                 self._trigger_nmi()
@@ -217,7 +265,7 @@ class NESPPU:
             # write only
             # high byte first
             if self._ppu_addr_byte == 0:
-                self.ppu_addr = (self.ppu_addr & 0x00FF) + value << 8
+                self.ppu_addr = (self.ppu_addr & 0x00FF) + (value << 8)
             else:
                 self.ppu_addr = (self.ppu_addr & 0xFF00) + value
             # flip which byte is pointed to on each write; reset on ppu status read
@@ -225,6 +273,7 @@ class NESPPU:
         elif register == self.PPU_DATA:
             # read/write
             self.vram.write(self.ppu_addr, value)
+            self._increment_vram_address()
 
     def pre_render(self):
         self.sprite_zero_hit = False
@@ -234,8 +283,7 @@ class NESPPU:
         self.ppu_addr += 1 if (self.ppu_ctrl & self.VRAM_INCREMENT_MASK) == 0 else 32
 
     def _trigger_nmi(self):
-        #todo: figure out what to do here
-        pass
+        self.interrupt_listener.raise_nmi()
 
     def run_cycles(self, num_cycles):
         # cycles correspond to screen pixels during the screen-drawing phase of the ppu
@@ -259,28 +307,52 @@ class NESPPU:
 
             if line == 0 and pixel == 65:
                 self._oam_addr_held = self.oam_addr
+
+            # TODO: THIS IS A MASSIVE HACK - REMOVE THIS    ******************************************************
+            elif line==50 and pixel == 25:
+                self.sprite_zero_hit = True
+
+
+
             elif line == 240 and pixel == 0:
                 # post-render scanline, ppu is idle
                 # in this emulator, this is when we render the screen
                 self.render_screen()
             elif line == 241 and pixel == 1:
                 # set vblank flag
-                self.ppu_status |= self.VBLANK_MASK  # set the vblank flag in ppu_status register
-                # trigger NMI
-                self._trigger_nmi()
+                self.in_vblank = True   # set the vblank flag in ppu_status register
+                # trigger NMI (if NMI is enabled)
+                if (self.ppu_ctrl & self.VBLANK_MASK) > 0:
+                    self._trigger_nmi()
             elif line <= 260:
                 # during vblank, ppu does no memory accesses; most of the CPU accesses happens here
                 pass
             elif line == 261:
                 # pre-render scanline for next frame; at dot 1, reset vblank flag in ppu_status
                 if pixel == 1:
-                    self.ppu_status &= ~self.VBLANK_MASK
-                elif pixel == 341 - self.frames_since_reset % 2:
+                    self.in_vblank = False
+                elif pixel == self.PIXELS_PER_LINE - 1 - self.frames_since_reset % 2:
                     # this is the last pixel in the frame, so trigger the end-of-frame
                     self._new_frame()
 
             self.cycles_since_reset += 1
             self.cycles_since_frame += 1
+
+            logging.debug(self.log_line(), extra={"source": "PPU"})
+
+    def log_line(self):
+        log = "{:5d}, {:3d}, {:3d}   ".format(self.frames_since_reset, *self._get_line_and_pixel())
+        log += "C:{:02X} M:{:02X} S:{:02X} OA:{:02X} OD:{:02X} ".format(self.ppu_ctrl,
+                                                                                  self.ppu_mask,
+                                                                                  self.ppu_status,
+                                                                                  self.oam_addr,
+                                                                                  self.oam_data)
+
+        log += "SC:{:02X},{:02X} PA:{:04X}".format(self.ppu_scroll[0],
+                                                                   self.ppu_scroll[1],
+                                                                   self.ppu_addr)
+
+        return log
 
     def _get_line_and_pixel(self):
         """
@@ -295,6 +367,7 @@ class NESPPU:
         """
         Things to do at the start of a frame
         """
+        print("new frame")
         self.frames_since_reset += 1
         self.cycles_since_frame = 0
         # todo: "Vertical scroll bits are reloaded if rendering is enabled" - don't know what this means
@@ -314,6 +387,9 @@ class NESPPU:
         # render the sprite tiles
         self.render_sprites()
 
+        # show the screen
+        self.screen.show()
+
     def render_background(self):
         """
         Reads the nametable and attribute table and then sends the result of that for each
@@ -321,7 +397,7 @@ class NESPPU:
         """
         # which nametable is active?
         nametable = self.ppu_ctrl & self.NAMETABLE_MASK
-        addr_base = self.vram.NAMETABLE_START + nametable * self.vram.NAMETABLE_WIDTH
+        addr_base = self.vram.NAMETABLE_START + nametable * self.vram.NAMETABLE_LENGTH_BYTES
         for row in range(self.SCREEN_TILE_ROWS):
             vblock = int(row / 2)
             v_subblock_ix = vblock % 2
@@ -420,7 +496,7 @@ class NESPPU:
                 tile_upper = self.decode_tile(tile_upper_ix, tile_bank, palette, flip_h, flip_v)
                 tile_lower = self.decode_tile(tile_upper_ix + 1, tile_bank, palette, flip_h, flip_v)
                 tile = tile_upper + tile_lower if not flip_v else tile_lower + tile_upper
-
+            #print((address + 3) & 0xFF)
             x = self.oam[(address + 3) & 0xFF]
             sprites.append((x, y, tile, bkg_priority))
             address += 4

@@ -29,7 +29,7 @@ class NESCart0(CartBase):
     # PPU memory space
     CHR_ROM_START = 0x0000
 
-    def __init__(self, prg_rom_data=None, chr_rom_data=None, ram_size_kb=8, prg_start_addr=0x8000, nametable_mirror_pattern=(0,0,1,1)):
+    def __init__(self, prg_rom_data=None, chr_rom_data=None, ram_size_kb=8, prg_start_addr=None, nametable_mirror_pattern=(0,0,1,1)):
         super().__init__()
 
         # initialize ram (CPU connected)
@@ -51,7 +51,7 @@ class NESCart0(CartBase):
         else:
             self.chr_mem = bytearray(8 * 1024)   # make a RAM
 
-        self.prg_start_addr = prg_start_addr
+        self.prg_start_addr = prg_start_addr if prg_start_addr else self.PRG_ROM_START
         self.nametable_mirror_pattern = nametable_mirror_pattern
         #rom_data_start = load_rom_at - self.PRG_ROM_START
         #self.rom[rom_data_start:rom_data_start + len(rom_data)] = rom_data

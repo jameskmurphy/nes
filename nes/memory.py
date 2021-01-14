@@ -1,4 +1,4 @@
-
+import logging
 
 class MemoryBase:
     """
@@ -76,32 +76,45 @@ class NESMappedRAM(MemoryBase):
         """
         Read one byte of memory from the NES address space
         """
+
+
         if address < self.RAM_END:    # RAM and its mirrors
-            return self.ram[address % self.RAM_SIZE]
+            region = "ram"
+            value = self.ram[address % self.RAM_SIZE]
         elif address < self.PPU_END:  # PPU registers
+            region = "ppu"
             register_ix = address % self.NUM_PPU_REGISTERS
             if self.ppu is not None:
-                return self.ppu.read_register(register_ix)
+                value = self.ppu.read_register(register_ix)
             else:
-                return 0
+                value = 0
         elif address < self.APU_END:
+            region = "apu/oam"
             if address == self.OAM_DMA and self.ppu:
                 # write only
-                return 0
+                value = 0
             else:
                 # todo: APU registers
-                return 0
+                value = 0
         elif address < self.APU_UNUSED_END:
             # todo: generally unused APU and I/O functionality
-            return 0
+            region = "apu-unused"
+            value = 0
         else:
             # cartridge space; pass this to the cart, which might do its own mapping
-            return self.cart.read(address)
+            region = "cart"
+            value = self.cart.read(address)
+
+        logging.debug("read {:04X}  (= {:02X})  region={:10s}".format(address, value, region), extra={"source": "mem"})
+
+        return value
 
     def write(self, address, value):
         """
         Write one byte of memory in the NES address space
         """
+        logging.debug("write {:02X} --> {:04X}".format(value, address), extra={"source": "mem"})
+
         if address < self.RAM_END:    # RAM and its mirrors
             self.ram[address % self.RAM_SIZE] = value
         elif address < self.PPU_END:  # PPU registers
@@ -123,7 +136,8 @@ class NESMappedRAM(MemoryBase):
             self.cart.write(address, value)
 
     def run_oam_dma(self, page):
-        self.ppu.oam[0:self.ppu.OAM_SIZE_BYTES] = self.read_block(page << 8, 0xFF)
+        logging.debug("OAM DMA from page {:02X}".format(page), extra={"source": "mem"})
+        self.ppu.oam[0:self.ppu.OAM_SIZE_BYTES] = self.read_block(page << 8, self.ppu.OAM_SIZE_BYTES)
         # todo: this should cause the CPU to suspend for 513 or 514 cycles
 
 
@@ -138,7 +152,7 @@ class NESVRAM(MemoryBase):
     PATTERN_TABLE_SIZE_BYTES = 4096   # provided by the rom
     NAMETABLES_SIZE_BYTES = 2048
     PALETTE_SIZE_BYTES = 32
-    NAMETABLE_WIDTH = 1024  # single nametime is this big   #todo: this name is misleading; is really length of a single nametable in bytes
+    NAMETABLE_LENGTH_BYTES = 1024  # single nametime is this big   #todo: this name is misleading; is really length of a single nametable in bytes
 
     # memory map
     NAMETABLE_START = 0x2000
@@ -172,13 +186,13 @@ class NESVRAM(MemoryBase):
             return self.cart.chr_mem, address % len(self.cart.chr_mem)  # todo: need something better here via the read_ppu/wrtie_ppu in order to implement mappers
         elif address < self.PALETTE_START:
             # nametable
-            page = int((address - self.NAMETABLE_START) / self.NAMETABLE_WIDTH)  # which nametable?
-            offset = (address - self.NAMETABLE_START) % self.NAMETABLE_WIDTH  # offset in that table
+            page = int((address - self.NAMETABLE_START) / self.NAMETABLE_LENGTH_BYTES)  # which nametable?
+            offset = (address - self.NAMETABLE_START) % self.NAMETABLE_LENGTH_BYTES  # offset in that table
 
             # some of the pages (e.g. 2 and 3) are mirrored, so for these, find the underlying
             # namepage that they point to based on the mirror pattern
             true_page = self.nametable_mirror_pattern[page]
-            return self._nametables, true_page * self.NAMETABLE_WIDTH + offset
+            return self._nametables, true_page * self.NAMETABLE_LENGTH_BYTES + offset
         else:
             # palette table
             if address == 0x3F10 or address == 0x3F14 or address == 0x3F18 or address == 0x3F1C:
@@ -189,10 +203,13 @@ class NESVRAM(MemoryBase):
             return self.palette_ram, address % self.PALETTE_SIZE_BYTES
 
     def read(self, address):
-        memory, address = self.decode_address(address)
-        return memory[address]
+        memory, address_decoded = self.decode_address(address)
+        value = memory[address_decoded]
+        logging.debug("read {:04X} [{:04X}]  (= {:02X})".format(address, address_decoded, value), extra={"source": "vram"})
+        return value
 
     def write(self, address, value):
+        logging.debug("write {:02X} --> {:04X}".format(value, address), extra={"source": "vram"})
         memory, address = self.decode_address(address)
         memory[address] = value
 

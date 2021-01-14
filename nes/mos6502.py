@@ -1,3 +1,5 @@
+import logging
+
 from .instructions import INSTRUCTION_SET, Instruction, AddressModes
 
 class MOS6502:
@@ -48,6 +50,9 @@ class MOS6502:
     # 6502 is little endian (least significant byte first in 16bit words)
     LO_BYTE = 0
     HI_BYTE = 1
+
+    # cycles taken to do the NMI or IRQ interrupt - (this is a guess, based on BRK, couldn't find a ref for this!)
+    INTERRUPT_HANDLER_CYCLES = 7
 
 
     def __init__(self, memory, support_BCD=True, undocumented_support_level=1, aax_sets_flags=False):
@@ -270,6 +275,25 @@ class MOS6502:
             byte_hi = data[1]
         return byte_lo + (byte_hi << 8)
 
+    def trigger_nmi(self):
+        """
+        Trigger a non maskable interrupt (NMI)
+        """
+        self._interrupt(self.NMI_VECTOR_ADDR)
+        self.cycles_since_reset += self.INTERRUPT_HANDLER_CYCLES
+        return self.INTERRUPT_HANDLER_CYCLES
+
+    def trigger_irq(self):
+        """
+        Trigger a maskable hardware interrupt (IRQ); if interrupt disable bit (self.I) is set, ignore
+        """
+        if not self.I:
+            self._interrupt(self.IRQ_BRK_VECTOR_ADDR)
+            self.cycles_since_reset += self.INTERRUPT_HANDLER_CYCLES
+            return self.INTERRUPT_HANDLER_CYCLES
+        else:
+            return 0  # ignored!
+
     def run_next_instr(self):
         """
         Decode and run the next instruction at the program counter, updating the number of processor
@@ -356,6 +380,11 @@ class MOS6502:
         # update cycle count
         self.cycles_since_reset += int(instr.cycles) + extra_cycles
 
+        # logging
+        logging.debug(self.log_line(), extra={"source": "CPU"})
+
+        return int(instr.cycles) + extra_cycles
+
     def _status_to_byte(self, b_flag=0):
         """
         Puts the status register into an 8-bit value.  Bit 6 is set high always, bit 5 (the "B flag") is set according
@@ -388,6 +417,8 @@ class MOS6502:
         """
         Push a byte value onto the stack
         """
+        if self.SP == 0:
+            raise OverflowError("Stack overflow")
         self.memory.write(self.STACK_PAGE + self.SP, v)
         self.SP -= 1
 
@@ -395,6 +426,8 @@ class MOS6502:
         """
         Pop (pull) a byte from the stack
         """
+        if self.SP == 0xFF:
+            raise OverflowError("Stack underflow")
         self.SP += 1
         v = self.memory.read(self.STACK_PAGE + self.SP)
         return v
@@ -517,12 +550,15 @@ class MOS6502:
         """
         extra_cycles = 0
         if condition:
+            #print("jump")
             extra_cycles = 1  # taking a branch takes at least 1 cycle
             prev_pc_page = self.PC & 0xFF00  # should this be the PC before the branch instruction or after it?
             self.PC += self._from_2sc(offset_2sc)  # jumps to the address of the branch + 2 + offset (which is correct)
             if prev_pc_page != self.PC & 0xFF00:
                 # but it takes two cycles if the memory page changes
                 extra_cycles = 2
+        #else:
+        #    print("no jump")
         return extra_cycles
 
     def _bcc(self, offset, _):
@@ -553,6 +589,9 @@ class MOS6502:
         self.V = (v & self.SR_V_MASK) > 0
         self.Z = (self.A & v) == 0
 
+
+        #print("bpl {:X}".format(addr), v, self.N)
+
     def _bmi(self, offset, _):
         """
         Branch on result minus (i.e. negative flag N is set)
@@ -569,22 +608,44 @@ class MOS6502:
         """
         Branch on result positive (i.e. negative flag N is not set)
         """
+        #print(self.N, not self.N)
         return self._jump_relative(not self.N, offset)
+
+    def _interrupt(self, interrupt_vector, is_brk=False):
+        """
+        Interrupt routine, followed (with variations) by NMI, IRQ and BRK
+          1)
+        """
+        # push PC + 1 to the stack, high bit first
+        v = self.PC + (1 if is_brk else 0)
+        self.push_stack((v & 0xFF00) >> 8)  # high byte
+        self.push_stack(v & 0x00FF)  # low byte
+        # push the processor status to the stack
+        # BUT note that the B flag ON THE STACK COPY ONLY is now set
+        sr = self._status_to_byte(b_flag=True if is_brk else False)
+        self.push_stack(sr)
+        #addr = self._from_le(self.memory.read_block(interrupt_vector, bytes=2))
+        addr = self._read_word(interrupt_vector)
+        self.PC = addr
+        if not is_brk:
+            # if this is not a brk instruction, set the interrupt disable flag
+            self.I = True
 
     def _brk(self, _, __):
         """
         Force break, which simulates an interrupt request.  This is a rather messy instruction
         """
         # push PC + 1 to the stack, high bit first
-        v = self.PC + 1
-        self.push_stack((v & 0xFF00) >> 8)  # high bit
-        self.push_stack(v & 0x00FF)         # low bit
+        self._interrupt(self.IRQ_BRK_VECTOR_ADDR, is_brk=True)
+        """v = self.PC + 1
+        self.push_stack((v & 0xFF00) >> 8)  # high byte
+        self.push_stack(v & 0x00FF)         # low byte
         # push the processor status to the stack
         # BUT note that the B flag ON THE STACK COPY ONLY is now set
         sr = self._status_to_byte(b_flag=True)
         self.push_stack(sr)
         addr = self._from_le(self.memory.read_block(self.IRQ_BRK_VECTOR_ADDR, bytes=2))
-        self.PC = addr
+        self.PC = addr"""
 
     def _bvc(self, offset, _):
         """

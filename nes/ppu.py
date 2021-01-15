@@ -1,4 +1,5 @@
 import logging
+import time
 
 from .memory import NESVRAM
 from .bitwise import bit_high, set_bit, clear_bit
@@ -113,6 +114,7 @@ class NESPPU:
         self.cycles_since_frame = 0  # number of cycles since the frame start
         self.frames_since_reset = 0  # need all three counters (not really, but easier) because frame lengths vary
         self.visible = False         # is the ppu currently outputting to the screen
+        self.time_at_new_frame = None
 
         # memory
         self.vram = NESVRAM(cart=cart)
@@ -232,8 +234,6 @@ class NESPPU:
 
         self._io_latch = value & 0xFF
 
-        #print("write ppu reg: {:02X} --> {} ".format(value, register))
-
         if register == self.PPU_CTRL:
             # write only
             # can trigger an immediate NMI if we are in vblank and the (allow) vblank NMI trigger flag is flipped high
@@ -288,6 +288,7 @@ class NESPPU:
     def run_cycles(self, num_cycles):
         # cycles correspond to screen pixels during the screen-drawing phase of the ppu
         # there are three ppu cycles per cpu cycles, at least on NTSC systems
+        frame_ended = False
         for cyc in range(num_cycles):
             # current scanline of the frame we are on - this determines behaviour during the line
             line, pixel = self._get_line_and_pixel()
@@ -334,11 +335,13 @@ class NESPPU:
                 elif pixel == self.PIXELS_PER_LINE - 1 - self.frames_since_reset % 2:
                     # this is the last pixel in the frame, so trigger the end-of-frame
                     self._new_frame()
+                    frame_ended=True
 
             self.cycles_since_reset += 1
             self.cycles_since_frame += 1
 
             logging.debug(self.log_line(), extra={"source": "PPU"})
+        return frame_ended
 
     def log_line(self):
         log = "{:5d}, {:3d}, {:3d}   ".format(self.frames_since_reset, *self._get_line_and_pixel())
@@ -370,6 +373,11 @@ class NESPPU:
         print("new frame")
         self.frames_since_reset += 1
         self.cycles_since_frame = 0
+        tnow = time.time()
+        if self.time_at_new_frame:
+            dt = tnow - self.time_at_new_frame
+            print("Time since last frame start: {:.2f}ms  (~{:1f}fps)".format(dt * 1000.,  1. / dt))
+        self.time_at_new_frame = tnow
         # todo: "Vertical scroll bits are reloaded if rendering is enabled" - don't know what this means
         # maybe resets/loads bits 1 and 0 of ppu_ctrl, which controls the base nametable
 

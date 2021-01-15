@@ -63,14 +63,18 @@ class NESMappedRAM(MemoryBase):
     APU_END = 0x4018            # APU registers (+OAM DMA reg) to here
     APU_UNUSED_END = 0x4020     # generally unused APU and I/O functionality
     OAM_DMA = 0x4014            # OAM DMA register address
+    CONTROLLER1 = 0x4016        # port for controller (read controller 1 / write both controllers)
+    CONTROLLER2 = 0x4017        # port for controller 2
     CART_START = 0x4020         # start of cartridge address space
 
-    def __init__(self, ppu=None, apu=None, cart=None):
+    def __init__(self, ppu=None, apu=None, cart=None, controller1=None, controller2=None):
         super().__init__()
         self.ram = bytearray(self.RAM_SIZE)  # 2kb of internal RAM
         self.ppu = ppu
         self.apu = apu
         self.cart = cart
+        self.controller1 = controller1
+        self.controller2 = controller2
 
     def read(self, address):
         """
@@ -93,6 +97,10 @@ class NESMappedRAM(MemoryBase):
             if address == self.OAM_DMA and self.ppu:
                 # write only
                 value = 0
+            elif address == self.CONTROLLER1:
+                value = self.controller1.read_bit()
+            elif address == self.CONTROLLER2:
+                value = self.controller2.read_bit() if self.controller2 else 0
             else:
                 # todo: APU registers
                 value = 0
@@ -125,6 +133,10 @@ class NESMappedRAM(MemoryBase):
             if address == self.OAM_DMA:
                 if self.ppu:
                     self.run_oam_dma(value)
+                elif address == self.CONTROLLER1:
+                    self.controller1.set_strobe(value)
+                    if self.controller2:
+                        self.controller2.set_strobe(value)
             else:
                 # todo: APU registers
                 pass

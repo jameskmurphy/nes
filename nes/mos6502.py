@@ -2,6 +2,8 @@ import logging
 
 from .instructions import INSTRUCTION_SET, Instruction, AddressModes
 
+from nes import LOG_CPU
+
 class MOS6502:
     """
     Software emulator for MOS Technologies 6502 CPU
@@ -52,10 +54,9 @@ class MOS6502:
     HI_BYTE = 1
 
     # cycles taken to do the NMI or IRQ interrupt - (this is a guess, based on BRK, couldn't find a ref for this!)
-    INTERRUPT_HANDLER_CYCLES = 7
+    INTERRUPT_REQUEST_CYCLES = 7
 
-
-    def __init__(self, memory, support_BCD=True, undocumented_support_level=1, aax_sets_flags=False):
+    def __init__(self, memory, support_BCD=True, undocumented_support_level=1, aax_sets_flags=False, stack_underflow_causes_exception=True):
 
         # memory is user-supplied object with read and write methods, allowing for memory mappers, bank switching, etc.
         self.memory = memory
@@ -93,6 +94,7 @@ class MOS6502:
         self.support_BCD = support_BCD
         self.aax_sets_flags = aax_sets_flags
         self.undocumented_support_level = undocumented_support_level
+        self.stack_underflow_causes_exception = stack_underflow_causes_exception
 
 
     def reset(self):
@@ -184,36 +186,36 @@ class MOS6502:
         print("cycles: {}".format(self.cycles_since_reset))
 
     def format_instruction(self, instr, data, caps=True):
-        str = ""
+        line = ""
         name = instr.name if not caps else instr.name.upper()
-        str += '{} '.format(name)
+        line += '{} '.format(name)
         if instr.mode == AddressModes.IMMEDIATE:
-            str += '#${0:02X}'.format(data[0])
+            line += '#${0:02X}'.format(data[0])
         elif instr.mode == AddressModes.ZEROPAGE:
-            str += '${0:02X}'.format(data[0])
+            line += '${0:02X}'.format(data[0])
         elif instr.mode == AddressModes.ZEROPAGE_X:
-            str += '${0:02X},X'.format(data[0])
+            line += '${0:02X},X'.format(data[0])
         elif instr.mode == AddressModes.ZEROPAGE_Y:
-            str += '${0:02X},Y'.format(data[0])
+            line += '${0:02X},Y'.format(data[0])
         elif instr.mode == AddressModes.ABSOLUTE:
-            str += '${0:04X}'.format(self._from_le(data))
+            line += '${0:04X}'.format(self._from_le(data))
         elif instr.mode == AddressModes.ABSOLUTE_X:
-            str += '${0:04X},X'.format(self._from_le(data))
+            line += '${0:04X},X'.format(self._from_le(data))
         elif instr.mode == AddressModes.ABSOLUTE_Y:
-            str += '${0:04X},Y'.format(self._from_le(data))
+            line += '${0:04X},Y'.format(self._from_le(data))
         elif instr.mode == AddressModes.INDIRECT_X:
-            str += '(${:02X},X) @ {:02X} = {:04X}'.format(data[0], data[0], self._read_word((data[0] + self.X) & 0xFF, wrap_at_page=True))
+            line += '(${:02X},X) @ {:02X} = {:04X}'.format(data[0], data[0], self._read_word((data[0] + self.X) & 0xFF, wrap_at_page=True))
         elif instr.mode == AddressModes.INDIRECT_Y:
-            str += '(${:02X}),Y = {:04X} @ {:04X}'.format(data[0], self._read_word(data[0], wrap_at_page=True), (self._read_word(data[0], wrap_at_page=True) + self.Y) & 0xFFFF)
+            line += '(${:02X}),Y = {:04X} @ {:04X}'.format(data[0], self._read_word(data[0], wrap_at_page=True), (self._read_word(data[0], wrap_at_page=True) + self.Y) & 0xFFFF)
         elif instr.mode == AddressModes.INDIRECT:
-            str += '(${0:04X})'.format(self._from_le(data))
+            line += '(${0:04X})'.format(self._from_le(data))
         elif instr.mode == AddressModes.IMPLIED:
-            str += ''
+            line += ''
         elif instr.mode == AddressModes.ACCUMULATOR:
-            str += 'A'
+            line += 'A'
         elif instr.mode == AddressModes.RELATIVE:
-            str += '${0:02X} (-> ${1:04X})'.format(self._from_2sc(data[0]), self.PC + 2 + self._from_2sc(data[0]))
-        return str
+            line += '${0:02X} (-> ${1:04X})'.format(self._from_2sc(data[0]), self.PC + 2 + self._from_2sc(data[0]))
+        return line
 
     def log_line(self):
         """
@@ -280,8 +282,8 @@ class MOS6502:
         Trigger a non maskable interrupt (NMI)
         """
         self._interrupt(self.NMI_VECTOR_ADDR)
-        self.cycles_since_reset += self.INTERRUPT_HANDLER_CYCLES
-        return self.INTERRUPT_HANDLER_CYCLES
+        self.cycles_since_reset += self.INTERRUPT_REQUEST_CYCLES
+        return self.INTERRUPT_REQUEST_CYCLES
 
     def trigger_irq(self):
         """
@@ -289,8 +291,8 @@ class MOS6502:
         """
         if not self.I:
             self._interrupt(self.IRQ_BRK_VECTOR_ADDR)
-            self.cycles_since_reset += self.INTERRUPT_HANDLER_CYCLES
-            return self.INTERRUPT_HANDLER_CYCLES
+            self.cycles_since_reset += self.INTERRUPT_REQUEST_CYCLES
+            return self.INTERRUPT_REQUEST_CYCLES
         else:
             return 0  # ignored!
 
@@ -381,7 +383,7 @@ class MOS6502:
         self.cycles_since_reset += int(instr.cycles) + extra_cycles
 
         # logging
-        logging.debug(self.log_line(), extra={"source": "CPU"})
+        #logging.log(LOG_CPU, self.log_line(), extra={"source": "CPU"})
 
         return int(instr.cycles) + extra_cycles
 
@@ -417,18 +419,21 @@ class MOS6502:
         """
         Push a byte value onto the stack
         """
-        if self.SP == 0:
-            raise OverflowError("Stack overflow")
         self.memory.write(self.STACK_PAGE + self.SP, v)
-        self.SP -= 1
+        #if self.SP == 0:
+        #    if self.stack_overflow_causes_exception:
+        #        raise OverflowError("Stack overflow")
+        #    else:
+        #        self.SP = 0xFF
+        self.SP = (self.SP - 1) & 0xFF
 
     def pop_stack(self):
         """
-        Pop (pull) a byte from the stack
+        Pop (aka 'pull' in 6502 parlance) a byte from the stack
         """
-        if self.SP == 0xFF:
+        if self.SP == 0xFF and self.stack_underflow_causes_exception:
             raise OverflowError("Stack underflow")
-        self.SP += 1
+        self.SP = (self.SP + 1) & 0xFF
         v = self.memory.read(self.STACK_PAGE + self.SP)
         return v
 
@@ -473,6 +478,8 @@ class MOS6502:
         """
         self.Z = (v & 0xFF) == 0  # only care about the bottom 8 bits being zero
         self.N = (v & 0b10000000) > 0
+
+    ##################  The instructions (and their helper functions)  #################################################
 
     def _adc(self, arg, immediate):
         """
@@ -589,9 +596,6 @@ class MOS6502:
         self.V = (v & self.SR_V_MASK) > 0
         self.Z = (self.A & v) == 0
 
-
-        #print("bpl {:X}".format(addr), v, self.N)
-
     def _bmi(self, offset, _):
         """
         Branch on result minus (i.e. negative flag N is set)
@@ -633,19 +637,14 @@ class MOS6502:
 
     def _brk(self, _, __):
         """
-        Force break, which simulates an interrupt request.  This is a rather messy instruction
+        Force break, which simulates an interrupt request.
+        BRK, unlike other interrupts (IRQ and NMI), pushes PC + 1 to the stack (high byte first as usual).
+        The reason for this may have been to allow brk to be dropped in in place of two byte instructions to allow
+        debugging, but it is a quirk of the BRK instruction.  BRK also sets the B flag in the value of SR pushed to
+        the stack
         """
-        # push PC + 1 to the stack, high bit first
+        #
         self._interrupt(self.IRQ_BRK_VECTOR_ADDR, is_brk=True)
-        """v = self.PC + 1
-        self.push_stack((v & 0xFF00) >> 8)  # high byte
-        self.push_stack(v & 0x00FF)         # low byte
-        # push the processor status to the stack
-        # BUT note that the B flag ON THE STACK COPY ONLY is now set
-        sr = self._status_to_byte(b_flag=True)
-        self.push_stack(sr)
-        addr = self._from_le(self.memory.read_block(self.IRQ_BRK_VECTOR_ADDR, bytes=2))
-        self.PC = addr"""
 
     def _bvc(self, offset, _):
         """
@@ -1089,7 +1088,9 @@ class MOS6502:
         self.A = self.Y
         self._set_zn(self.A)
 
-    # undocumented instructions - see [13]
+    ################################## The undocumented instructions (see [13] and others) #############################
+    # todo: add the undocumented-level feature to the instruction list and remove the per-function tests here
+
     def _dop(self, _, __):
         """
         Undocumented.
@@ -1107,7 +1108,7 @@ class MOS6502:
     def _kil(self, _, __):
         """
         Undocumented.
-        Instruction that shuts down the processor.
+        Shuts down the processor.  No recovery is possible after this has executed, short of a reset.
         """
         if self.undocumented_support_level >= 1:
             raise ValueError("KIL instruction.  Processor halted.")
@@ -1197,6 +1198,8 @@ class MOS6502:
         if self.undocumented_support_level >= 1:
             self._lsr(addr, None)
             self._eor(self.memory.read(addr), immediate=True)
+
+    ##################### The arcane undocumented instructions (see [13] and others) ###################################
 
     def _arr(self, arg, _):
         """

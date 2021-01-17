@@ -2,10 +2,12 @@ from .mos6502 import MOS6502
 from .memory import NESMappedRAM
 from .ppu import NESPPU
 from .rom import ROM
-from .peripherals import Screen, Gamepad
+from .peripherals import Screen, KeyboardController, ControllerBase
+from nes import LOG_CPU, LOG_PPU, LOG_MEMORY
 
 import logging
 
+import pygame
 
 class InterruptListener:
     def __init__(self):
@@ -35,21 +37,16 @@ class NES:
     """
 
     PPU_CYCLES_PER_CPU_CYCLE = 3
+    FRAMERATE_FPS = 60
 
-    def __init__(self, rom_file, screen_scale=3, logfile=None, prg_start=None):
+    def __init__(self, rom_file, screen_scale=3, log_file=None, log_level=None, prg_start=None):
         """
         Build a NES and cartridge from the bits and pieces we have lying around plus some rom data!  Also do some things
         like set up logging, etc.
         """
 
-        # todo: ugly way to handle this, will remove
-        self._has_updated_gamepad = False   # whether or not the gamepad status has been updated on this loop
-
-        # set up logging to the format as we required
-        logging.basicConfig(filename=logfile,
-                            level=logging.DEBUG,
-                            format='%(asctime)-15s %(source)-5s %(message)s',
-                            )
+        # set up the logger
+        self.init_logging(log_file, log_level)
 
         rom = ROM(rom_file)
 
@@ -62,8 +59,8 @@ class NES:
         self.screen = Screen(scale=screen_scale)
 
         # game controllers have no dependencies
-        self.controller1 = Gamepad()
-        self.controller2 = Gamepad(active=False)   # connect a second gamepad, but make it inactive for now
+        self.controller1 = KeyboardController()
+        self.controller2 = ControllerBase(active=False)   # connect a second gamepad, but make it inactive for now
 
         # the interrupt listener here is not a NES hardware device, it is an interrupt handler that is used to pass
         # interrupts between the PPU and CPU in this emulator
@@ -89,6 +86,27 @@ class NES:
         # Let's get started!  Reset the cpu so we are ready to go...
         self.cpu.reset()
 
+    def init_logging(self, log_file, log_level):
+        """
+        Initialize the logging; set the log file and the logging level (LOG_MEMORY, LOG_PPU, LOG_CPU are all below
+        logging.DEBUG)
+        """
+        if log_file is None or log_level is None:
+            logging.disable()
+            return
+
+        logging.addLevelName(LOG_MEMORY, "MEMORY")  # set a low level for memory logging because it is so intense
+        logging.addLevelName(LOG_PPU, "PPU")
+        logging.addLevelName(LOG_CPU, "CPU")
+        # set up logging to the format as we required
+        logging.basicConfig(filename=log_file,
+                            level=logging.NOTSET,
+                            format='%(asctime)-15s %(source)-5s %(message)s',
+                            filemode='w',
+                            )
+        logging.root.setLevel(log_level)
+
+
     def step(self):
         """
         The heartbeat of the system.  Run one instruction on the CPU and the corresponding amount of cycles on the
@@ -110,23 +128,37 @@ class NES:
             cpu_cycles = self.cpu.run_next_instr()
 
         frame_ended = self.ppu.run_cycles(cpu_cycles * self.PPU_CYCLES_PER_CPU_CYCLE)
-
-
-        # todo: this is ugly and should be handled better
-        if self.ppu.in_vblank and not self._has_updated_gamepad:
-            self.controller1.update()
-            if self.controller2:
-                self.controller2.update()
-            self._has_updated_gamepad = True
-        if frame_ended:
-            self._has_updated_gamepad = False
+        return frame_ended
 
     def run(self):
         """
         Run the NES indefinitely (or until some quit signal); this will only exit on quit.
         There is some PyGame specific stuff in here in order to handle frame timing and checking for exits
         """
-        pass
+        pygame.init()
+        clock = pygame.time.Clock()
+
+        while True:
+            frame_ended=False
+            while not frame_ended:
+                frame_ended = self.step()
+
+            # update the controllers once per frame
+            self.controller1.update()
+            self.controller2.update()
+            self.screen.show()
+
+            # Check for an exit
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    return
+
+            clock.tick(self.FRAMERATE_FPS)
+            print("frame end:  {:.1f} fps".format(clock.get_fps()))
+
+
+
 
 
 

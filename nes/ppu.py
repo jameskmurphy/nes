@@ -3,6 +3,7 @@ import time
 
 from .memory import NESVRAM
 from .bitwise import bit_high, set_bit, clear_bit
+from nes import LOG_PPU
 
 class NESPPU:
     """
@@ -104,6 +105,17 @@ class NESPPU:
         # last write/valid read of the ppu registers, sometimes reflected in read statuses
         self._io_latch = 0
 
+        # internal latches used in rendering
+        self._palette = [self.DEFAULT_NES_PALETTE[0:3], self.DEFAULT_NES_PALETTE[3:6]]     # 2 x palette latches
+        self._pattern_lo = bytearray(2)  # 2 x 8 bit patterns
+        self._pattern_hi = bytearray(2)  # 2 x 8 bit patterns
+
+        # some state used in rendering to tell us where on the screen we are drawing
+        self.line = 0
+        self.pixel = 0
+        self.row = 0
+        self.col = 0
+
         # internal statuses
         self.in_vblank = False
         self.sprite_zero_hit = False
@@ -113,8 +125,9 @@ class NESPPU:
         self.cycles_since_reset = 0
         self.cycles_since_frame = 0  # number of cycles since the frame start
         self.frames_since_reset = 0  # need all three counters (not really, but easier) because frame lengths vary
-        self.visible = False         # is the ppu currently outputting to the screen
         self.time_at_new_frame = None
+
+
 
         # memory
         self.vram = NESVRAM(cart=cart)
@@ -158,9 +171,9 @@ class NESPPU:
         The ppu status register value (without io latch noise in lower bits)
         :return:
         """
-        return (self.VBLANK_MASK * self.in_vblank
-         + self.SPRITE0_HIT_MASK * self.sprite_zero_hit
-         + self.SPRITE_OVERFLOW_MASK * self.sprite_overflow)
+        return self.VBLANK_MASK * self.in_vblank \
+               + self.SPRITE0_HIT_MASK * self.sprite_zero_hit \
+               + self.SPRITE_OVERFLOW_MASK * self.sprite_overflow
 
     def read_register(self, register):
         """
@@ -180,25 +193,11 @@ class NESPPU:
             print("WARNING: reading i/o latch")
             return self._io_latch
         elif register == self.PPU_STATUS:
-
             # clear ppu_scroll and ppu_addr latches
             self._ppu_addr_byte = 0
             self._ppu_scroll_ix = 0
-            #vblank = self.in_vblank
-            #print(self.ppu_status, vblank)
-
-            #self.ppu_status &= ~self.VBLANK_MASK
-            #v = (  self.VBLANK_MASK * vblank
-            #     + self.SPRITE0_HIT_MASK * self.sprite_zero_hit
-            #     + self.SPRITE_OVERFLOW_MASK * self.sprite_overflow
-            #     + (0x00011111 & self._io_latch)
-            #     )
-            #print("ppu status", v)
-
             v = self.ppu_status + (0x00011111 & self._io_latch)
             self.in_vblank = False  # clear vblank in ppu_status
-
-
             self._io_latch = v
             return v
         elif register == self.OAM_ADDR:
@@ -291,60 +290,122 @@ class NESPPU:
         frame_ended = False
         for cyc in range(num_cycles):
             # current scanline of the frame we are on - this determines behaviour during the line
-            line, pixel = self._get_line_and_pixel()
+            if self.line <= 239 and (self.ppu_mask & self.RENDERING_ENABLED_MASK) > 0:
+                # visible scanline
+                if 0 < self.pixel <= 256:
+                    # render pixel-1
+                    # previously fetched tile is in _nametable_byte
+                    #ntbl_base = self.vram.NAMETABLE_START + (self.ppu_ctrl & self.NAMETABLE_MASK) * self.vram.NAMETABLE_LENGTH_BYTES
+                    #tile_index = self.vram.read(ntbl_base + row * self.SCREEN_TILE_COLS + col)
+                    if self.pixel > 1 and self.pixel % 8 == 1:
+                        # fill latches
+                        self.shift_latches()  # move the data from the upper latches into the current ones
+                        self.fill_latches(self.line, self.col + 1)   # get some more data for the upper latches
+                    # render from latches
+                    self.render_pixel()
+                elif self.pixel <= 320:
+                    # todo sprite fetching
+                    pass
+                elif self.pixel <= 336:
+                    # load data for next scanline
+                    if self.pixel % 8 == 1:  # will happen at 321 and 329
+                        # fill latches
+                        self.shift_latches()  # move the data from the upper latches into the current ones
+                        self.fill_latches(self.line + 1, int((self.pixel - 321) / 8))  # get some more data for the upper latches
+                else:  # pixel <= 340
+                    # todo: unknown nametable fetches (used by MMC5)
+                    pass
 
-            if line <= 239 and (self.ppu_mask & self.RENDERING_ENABLED_MASK) > 0:
-                # visible scanline, set a flag so we can note any interaction during visible periods
-                self.visible = True
-
-                # todo: if this line contains sprite zero (and no sprite zero hit already), need to
-                # figure out if there has been a sprite zero hit.
-                # Idea:  pre-render background (before frame start), check sprite hit, adjust background for scroll things
-
-
-            else:
-                # non-visible
-                self.visible = False
-
-            if line == 0 and pixel == 65:
+            if self.line == 0 and self.pixel == 65:
+                # The OAM address is fixed after this point  [citation needed]
                 self._oam_addr_held = self.oam_addr
-
-            # TODO: THIS IS A MASSIVE HACK - REMOVE THIS    ******************************************************
-            elif line==50 and pixel == 25:
-                self.sprite_zero_hit = True
-
-
-
-            elif line == 240 and pixel == 0:
+            elif self.line == 240 and self.pixel == 0:
                 # post-render scanline, ppu is idle
                 # in this emulator, this is when we render the screen
-                self.render_screen()
-            elif line == 241 and pixel == 1:
+                # self.render_screen()
+                pass
+            elif self.line == 241 and self.pixel == 1:
                 # set vblank flag
                 self.in_vblank = True   # set the vblank flag in ppu_status register
                 # trigger NMI (if NMI is enabled)
                 if (self.ppu_ctrl & self.VBLANK_MASK) > 0:
                     self._trigger_nmi()
-            elif line <= 260:
+            elif self.line <= 260:
                 # during vblank, ppu does no memory accesses; most of the CPU accesses happens here
                 pass
-            elif line == 261:
+            elif self.line == 261:
                 # pre-render scanline for next frame; at dot 1, reset vblank flag in ppu_status
-                if pixel == 1:
+                if self.pixel == 1:
                     self.in_vblank = False
-                elif pixel == self.PIXELS_PER_LINE - 1 - self.frames_since_reset % 2:
+                elif self.pixel <= 336:
+                    # load data for next scanline
+                    if self.pixel % 8 == 1:  # will happen at 321 and 329
+                        # fill latches
+                        self.shift_latches()  # move the data from the upper latches into the current ones
+                        self.fill_latches(line=0, col=int((self.pixel - 321) / 8))  # get some more data for the upper latches
+                elif self.pixel == self.PIXELS_PER_LINE - 1 - self.frames_since_reset % 2:
                     # this is the last pixel in the frame, so trigger the end-of-frame
                     self._new_frame()
                     frame_ended=True
 
             self.cycles_since_reset += 1
             self.cycles_since_frame += 1
+            self.pixel += 1
+            if self.pixel > 0 and self.pixel % 8 == 0:
+                self.col += 1
+            if self.pixel >= self.PIXELS_PER_LINE:
+                self.line += 1
+                self.pixel = 0
+                self.col = 0
+                if self.line > 0 and self.line % 8 == 0:
+                    self.row += 1
 
-            logging.debug(self.log_line(), extra={"source": "PPU"})
+            #logging.log(LOG_PPU, self.log_line(), extra={"source": "PPU"})
         return frame_ended
 
+    def fill_latches(self, line, col):
+        """
+        Fill the ppu's rendering latches with the next tile to be rendered
+        :return:
+        """
+        # todo: optimization - a lot of this can be precalculated once and then invalidated if anything changes, since that might only happen once per frame (or never)
+        # get the tile from the nametable
+        row = int(line / 8)
+        ntbl_base = self.vram.NAMETABLE_START + (self.ppu_ctrl & self.NAMETABLE_MASK) * self.vram.NAMETABLE_LENGTH_BYTES
+        tile_index = self.vram.read(ntbl_base + row * self.SCREEN_TILE_COLS + col)
+        tile_bank = (self.ppu_ctrl & self.BKG_PATTERN_TABLE_MASK) > 0
+        table_base = tile_bank * 0x1000
+        tile_base = table_base + tile_index * self.PATTERN_SIZE_BYTES
+
+        attribute_byte = self.vram.read(ntbl_base
+                                        + self.vram.ATTRIBUTE_TABLE_OFFSET
+                                        + (int(row / 4) * 8 + int(col / 4))
+                                        )
+
+        shift = 4 * int(row / 2) % 2 + 2 * int(col / 2) % 2
+        mask = 0b00000011 << shift
+        palette_id = (attribute_byte & mask) >> shift
+
+        # todo: can pre-decode all these palettes, cache and invalidate on write to palette ram
+        self._palette[1] = self.decode_palette(palette_id, is_sprite=False)
+
+        tile_line = line - 8 * row
+        self._pattern_lo[1] = self.vram.read(tile_base + tile_line)
+        self._pattern_hi[1] = self.vram.read(tile_base + tile_line + 8)
+
+    def shift_latches(self):
+        self._palette[0] = self._palette[1]
+        self._pattern_lo[0] = self._pattern_lo[1]
+        self._pattern_hi[0] = self._pattern_hi[1]
+
+    def render_pixel(self):
+        # the data we need is in the zero indices of the latches
+        mask = 1 << (7 - (self.pixel - 1) % 8)
+        c = self._palette[0][((self._pattern_lo[0] & mask) > 0) + ((self._pattern_hi[0] & mask) > 0) * 2]
+        self.screen.write_at(x=self.pixel, y=self.line, color=c)
+
     def log_line(self):
-        log = "{:5d}, {:3d}, {:3d}   ".format(self.frames_since_reset, *self._get_line_and_pixel())
+        log = "{:5d}, {:3d}, {:3d}   ".format(self.frames_since_reset, self.line, self.pixel)
         log += "C:{:02X} M:{:02X} S:{:02X} OA:{:02X} OD:{:02X} ".format(self.ppu_ctrl,
                                                                                   self.ppu_mask,
                                                                                   self.ppu_status,
@@ -357,27 +418,19 @@ class NESPPU:
 
         return log
 
-    def _get_line_and_pixel(self):
-        """
-        Determine the current line (up to 261) and pixel of that line (up to 341) we are on given the
-        number of cycles that have been run since the start of the frame
-        """
-        line = int(self.cycles_since_frame / self.PIXELS_PER_LINE)
-        pixel = self.cycles_since_frame - self.PIXELS_PER_LINE * line
-        return line, pixel
-
     def _new_frame(self):
         """
         Things to do at the start of a frame
         """
-        print("new frame")
         self.frames_since_reset += 1
         self.cycles_since_frame = 0
-        tnow = time.time()
-        if self.time_at_new_frame:
-            dt = tnow - self.time_at_new_frame
-            print("Time since last frame start: {:.2f}ms  (~{:1f}fps)".format(dt * 1000.,  1. / dt))
-        self.time_at_new_frame = tnow
+        self.pixel = 0
+        self.line = 0
+        self.row = 0
+        self.col = 0
+
+        #logging.log(logging.INFO, "PPU frame {} starting".format(self.frames_since_reset), extra={"source": "PPU"})
+
         # todo: "Vertical scroll bits are reloaded if rendering is enabled" - don't know what this means
         # maybe resets/loads bits 1 and 0 of ppu_ctrl, which controls the base nametable
 
@@ -529,11 +582,6 @@ Development Notes
 
 TODO before can boot
 --------------------
-  - Trigger NMI
-     \-- can do this easily by return value of PPU run and then just pass to CPU for NMI that is generated from vsync
-         but NMI can also be generated from a register write, so have to figure out how to deal with that case.  Could
-         just use an interrupt controller that the ppu can write to and the cpu can check.  Or let the ppu have a ref
-         to the cpu, and implement a function there that can receive NMI.
   - Write screen renderer
      \-- sprite 0 collision detection (needs to be done during line scan, not render, so can CPU can detect at correct
          time).   One thought on this is to decode sprite 0 early in frame, so then we know where it will render and

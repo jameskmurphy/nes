@@ -49,14 +49,16 @@ class ControllerBase:
     """
     # code for each button
     # this is not just an enum, this is the bit position that they are fed out of the controller
-    A = 7
-    B = 6
-    SELECT = 5
-    START = 4
-    UP = 3
-    DOWN = 2
-    LEFT = 1
-    RIGHT = 0
+    A = 0
+    B = 1
+    SELECT = 2
+    START = 3
+    UP = 4
+    DOWN = 5
+    LEFT = 6
+    RIGHT = 7
+
+    NAMES = ['A', 'B', 'select', 'start', 'up', 'down', 'left', 'right']
 
     NUM_BUTTONS = 8
 
@@ -101,11 +103,12 @@ class ControllerBase:
         if not self.active:
             return 0
 
-        if self.strobe:
-            self._current_bit = 0
+        #if self.strobe:
+        #    self._current_bit = 0
         v = self.is_pressed[self._current_bit] if self._current_bit < self.NUM_BUTTONS else 1
         #logging.log(logging.DEBUG, "Controller bit {} is {}".format(self._current_bit, v), extra={"source": "cntrlr"})
-        self._current_bit = min((self._current_bit + 1), self.NUM_BUTTONS) # don't want this to overflow (very unlikely)
+        #print("Controller read bit ({:6s}) {} is {}".format(self.NAMES[self._current_bit], self._current_bit, v))
+        self._current_bit += 1 #min((self._current_bit + 1), self.NUM_BUTTONS) # don't want this to overflow (very unlikely)
         return v
 
 

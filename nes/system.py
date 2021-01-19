@@ -13,12 +13,19 @@ class InterruptListener:
     def __init__(self):
         self._nmi = False
         self._irq = False   # the actual IRQ line on the 6502 rests high and is low-triggered
+        self.oam_dma_pause = False
 
     def raise_nmi(self):
         self._nmi = True
 
     def reset_nmi(self):
         self._nmi = False
+
+    def reset_oam_dma_pause(self):
+        self.oam_dma_pause = False
+
+    def raise_oam_dma_pause(self):
+        self.oam_dma_pause = True
 
     @property
     def nmi_active(self):
@@ -38,6 +45,7 @@ class NES:
 
     PPU_CYCLES_PER_CPU_CYCLE = 3
     FRAMERATE_FPS = 60
+    OAM_DMA_CPU_CYCLES = 513
 
     def __init__(self, rom_file, screen_scale=3, log_file=None, log_level=None, prg_start=None):
         """
@@ -74,13 +82,15 @@ class NES:
                                    apu=None,
                                    cart=self.cart,
                                    controller1=self.controller1,
-                                   controller2=self.controller2
+                                   controller2=self.controller2,
+                                   interrupt_listener=self.interrupt_listener
                                    )
 
         # only the memory is connected to the cpu, all access to other devices is done through memory mapping
         self.cpu = MOS6502(memory=self.memory,
                            support_BCD=False,  # the NES cpu is a MOS6502 workalike that does not support the 6502's decimal modes
-                           undocumented_support_level=1  # a few NES games make use of some more common undocumented instructions
+                           undocumented_support_level=2,  # a few NES games make use of some more common undocumented instructions
+                           stack_underflow_causes_exception=False
                            )
 
         # Let's get started!  Reset the cpu so we are ready to go...
@@ -124,6 +134,10 @@ class NES:
             self.interrupt_listener.reset_nmi()
         elif self.interrupt_listener.irq_active:
             raise NotImplementedError("IRQ is not implemented")
+        elif self.interrupt_listener.oam_dma_pause:
+            # https://wiki.nesdev.com/w/index.php/PPU_OAM#DMA
+            cpu_cycles = self.OAM_DMA_CPU_CYCLES + self.cpu.cycles_since_reset % 2
+            self.interrupt_listener.reset_oam_dma_pause()
         else:
             cpu_cycles = self.cpu.run_next_instr()
 

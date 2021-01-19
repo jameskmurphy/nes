@@ -670,7 +670,7 @@ class MOS6502:
         """
         self.D = False
 
-    def _cli(self):
+    def _cli(self, _, __):
         """
         Clear interrupt disable flag (set I:=0)
         """
@@ -1297,11 +1297,12 @@ class MOS6502:
         """
         UNTESTED
         Undocumented.
-        AND X register with the high byte of the target address of the argument + 1. Store the result in memory. [16]
+        AND Y register with the high byte of the target address of the argument + 1. Store the result in memory. [16]
         """
         if self.undocumented_support_level >= 2:
-            hp1 = (((addr & 0xFF00) >> 8) + 1) & 0xFF
-            self.memory.write(addr, self.Y & hp1)
+            v = self.Y & ((((addr & 0xFF00) >> 8) + 1) & 0xFF)
+            self.memory.write(addr, v)
+            self._set_zn(v)
 
     def _xaa(self, arg, _):
         """

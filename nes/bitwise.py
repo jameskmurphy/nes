@@ -11,11 +11,22 @@ def clear_bit(target, bit):
 
 def bit_high(value, bit):
     """
-    Returns whether the bit specified is set high in value?
+    Returns whether the bit specified is set high in value
     e.g. bit_high(64, 6) == True    (64 = 0b01000000, so bit 6 is high)
          bit_high(64, 2) == False
     """
     return value & (0b00000001 << bit) > 0
+
+def bit_low(value, bit):
+    """
+    Returns whether the bit specified is set low in value
+    e.g. bit_high(64, 6) == False    (64 = 0b01000000, so bit 6 is high)
+         bit_high(64, 2) == True
+    """
+    return value & (0b00000001 << bit) == 0
+
+def replace_high_byte(v, hi_byte):
+    return v & 0x00FF + (hi_byte << 8)
 
 def lower_nibble(value):
     """

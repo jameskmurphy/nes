@@ -70,7 +70,7 @@ class NESMappedRAM(MemoryBase):
     CONTROLLER2 = 0x4017        # port for controller 2 (read only, writes to this port go to the APU)
     CART_START = 0x4020         # start of cartridge address space
 
-    def __init__(self, ppu=None, apu=None, cart=None, controller1=None, controller2=None):
+    def __init__(self, ppu=None, apu=None, cart=None, controller1=None, controller2=None, interrupt_listener=None):
         super().__init__()
         self.ram = bytearray(self.RAM_SIZE)  # 2kb of internal RAM
         self.ppu = ppu
@@ -78,6 +78,10 @@ class NESMappedRAM(MemoryBase):
         self.cart = cart
         self.controller1 = controller1
         self.controller2 = controller2
+        self.interrupt_listener = interrupt_listener
+
+        # internal variable used for open bus behaviour
+        self._last_bus = 0
 
     def read(self, address):
         """
@@ -99,11 +103,13 @@ class NESMappedRAM(MemoryBase):
                 # write only
                 value = 0
             elif address == self.CONTROLLER1:
-                value = self.controller1.read_bit()
+                value = (self.controller1.read_bit() & 0b00011111) + (0x40 & 0b11100000)
+                #print("{:08b}".format(value))
+                #print("{:08b}".format(self._last_bus))
                 # todo: deal with open bus behaviour of upper control lines
             elif address == self.CONTROLLER2:
                 # todo: deal with open bus behaviour of upper control lines
-                value = self.controller2.read_bit()
+                value = (self.controller2.read_bit() & 0b00011111) + (0x40 & 0b11100000)
             else:
                 # todo: APU registers
                 value = 0
@@ -117,7 +123,6 @@ class NESMappedRAM(MemoryBase):
             value = self.cart.read(address)
 
         #logging.log(LOG_MEMORY, "read {:04X}  (= {:02X})  region={:10s}".format(address, value, region), extra={"source": "mem"})
-
         return value
 
     def write(self, address, value):
@@ -151,8 +156,9 @@ class NESMappedRAM(MemoryBase):
 
     def run_oam_dma(self, page):
         logging.debug("OAM DMA from page {:02X}".format(page), extra={"source": "mem"})
-        self.ppu.oam[0:self.ppu.OAM_SIZE_BYTES] = self.read_block(page << 8, self.ppu.OAM_SIZE_BYTES)
-        # todo: this should cause the CPU to suspend for 513 or 514 cycles
+        self.ppu.oam[self.ppu.oam_addr:self.ppu.OAM_SIZE_BYTES] = self.read_block(page << 8, self.ppu.OAM_SIZE_BYTES - self.ppu.oam_addr)
+        self.ppu.oam[0:self.ppu.oam_addr] = self.read_block(page << 8, self.ppu.oam_addr)
+        self.interrupt_listener.raise_oam_dma_pause()
 
 
 class NESVRAM(MemoryBase):

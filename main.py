@@ -42,7 +42,9 @@ nes = NES("./roms/Super Mario Bros.nes", log_file="./logs/nes.log", log_level=lo
 # nes = NES("./tests/blargg_ppu_tests_2005.09.15b/vram_access.nes", log_file="./logs/nes.log", log_level=logging.INFO)
 
 # ************ FAILED ***************
-#nes = NES("./tests/blargg_ppu_tests_2005.09.15b/vbl_clear_time.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+# nes = NES("./tests/blargg_ppu_tests_2005.09.15b/vbl_clear_time.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+#  \-- fails with vbl cleared too late, but not too worried as vbl period is showing up as 2274, which is about right
+
 
 nes.run()
 

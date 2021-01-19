@@ -25,8 +25,8 @@ def bit_low(value, bit):
     """
     return value & (0b00000001 << bit) == 0
 
-def replace_high_byte(v, hi_byte):
-    return v & 0x00FF + (hi_byte << 8)
+
+########### Byte operations ############################################################################################
 
 def lower_nibble(value):
     """
@@ -39,3 +39,18 @@ def upper_nibble(value):
     Returns the value of the upper nibble of a byte (i.e. a value in range 0-15)
     """
     return (value & 0b11110000) >> 4
+
+
+########### Word operations ############################################################################################
+
+def set_high_byte(target, hi_byte):
+    """
+    Sets the high byte of a 16 bit target value (*not* a little endian word!) to hi_byte
+    """
+    return (target & 0x00FF) + (hi_byte << 8)
+
+def set_low_byte(target, lo_byte):
+    """
+    Sets the low byte of a 16 bit target value (*not* a little endian word!) to lo_byte
+    """
+    return (target & 0xFF00) + lo_byte

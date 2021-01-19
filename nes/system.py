@@ -137,11 +137,14 @@ class NES:
         elif self.interrupt_listener.oam_dma_pause:
             # https://wiki.nesdev.com/w/index.php/PPU_OAM#DMA
             cpu_cycles = self.OAM_DMA_CPU_CYCLES + self.cpu.cycles_since_reset % 2
+            self.cpu.cycles_since_reset += cpu_cycles  #todo: should we do this - don't think it matters
             self.interrupt_listener.reset_oam_dma_pause()
         else:
             cpu_cycles = self.cpu.run_next_instr()
 
+        #print(cpu_cycles, self.ppu.line, self.ppu.pixel)
         frame_ended = self.ppu.run_cycles(cpu_cycles * self.PPU_CYCLES_PER_CPU_CYCLE)
+        #print(cpu_cycles, self.ppu.line, self.ppu.pixel)
         return frame_ended
 
     def run(self):
@@ -152,10 +155,33 @@ class NES:
         pygame.init()
         clock = pygame.time.Clock()
 
+
+        in_vbl = False
+        vbl_cycles = 0
+        vbl_cycles_ppu = 0
+
         while True:
             frame_ended=False
             while not frame_ended:
                 frame_ended = self.step()
+
+
+
+                ####### DEBUG AND REPORTING ############################################################################
+                if not in_vbl and self.ppu.in_vblank:
+                    print("vbl start")
+                    in_vbl = True
+                    vbl_cycles = self.cpu.cycles_since_reset
+                    vbl_cycles_ppu = self.ppu.cycles_since_reset
+                elif in_vbl and self.ppu.line==261 and self.ppu.pixel > 1:
+                    print("vblank period (cpu, ppu cycles): ", self.cpu.cycles_since_reset - vbl_cycles, self.ppu.cycles_since_reset-vbl_cycles_ppu)
+                    in_vbl = False
+
+                if 0 <= self.ppu.line <= 30:
+                    logging.info(self.cpu.log_line(), extra={"source": "cpu"})
+                    logging.info(self.ppu.log_line(), extra={"source": "ppu"})
+                ####### DEBUG AND REPORTING  (end) #####################################################################
+
 
             # update the controllers once per frame
             self.controller1.update()

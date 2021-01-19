@@ -2,7 +2,7 @@ import logging
 import time
 
 from .memory import NESVRAM
-from .bitwise import bit_high, bit_low, set_bit, clear_bit, replace_high_byte
+from .bitwise import bit_high, bit_low, set_bit, clear_bit, set_high_byte, set_low_byte
 from nes import LOG_PPU
 
 class NESPPU:
@@ -121,20 +121,20 @@ class NESPPU:
 
         # internal latches used in background rendering
         self._palette = [self.DEFAULT_NES_PALETTE[0:3], self.DEFAULT_NES_PALETTE[3:6]]     # 2 x palette latches
-        self._pattern_lo = bytearray(2)  # 2 x 8 bit patterns
-        self._pattern_hi = bytearray(2)  # 2 x 8 bit patterns
+        self._pattern_lo = 0   # 16 bit patterns register to hold 2 x 8 bit patterns
+        self._pattern_hi = 0   # 16 bit patterns register to hold 2 x 8 bit patterns
 
         # internal memory and latches used in sprite rendering
         self._oam = bytearray(32)      # this is a secondary internal array of OAM used to store sprite that will be active on the next scanline
         self._sprite_pattern = [[None] * 8 for _ in range(8)]
         self._sprite_bkg_priority = [0] * 8
+        self._active_sprites = []
 
         # some state used in rendering to tell us where on the screen we are drawing
         self.line = 0
         self.pixel = 0
         self.row = 0
         self.col = 0
-        #self._bkg_px = 0
         self._t = 0
         self._tN = 0
         self._tX = 0
@@ -295,6 +295,9 @@ class NESPPU:
             self.oam_addr = (self.oam_addr + 1) & 0xFF
         elif register == self.PPU_SCROLL:
             # write only
+
+            print("scroll write: ", value, self.line, self.pixel)
+
             self.ppu_scroll[self._ppu_byte_latch] = value
             # flip which byte is pointed to on each write; reset on ppu status read
             #self._ppu_scroll_ix = 1 - self._ppu_scroll_ix
@@ -462,32 +465,37 @@ class NESPPU:
                         # todo: this is not cycle-correct, since the read is done atomically at the eighth pixel rather than throughout the cycle.
                         self.shift_bkg_latches()  # move the data from the upper latches into the current ones
                         self.fill_bkg_latches(self.line, self.col + 1)   # get some more data for the upper latches
+
                     # render background from latches
                     bkg_pixel = self._get_bkg_pixel()
                     # overlay srpite from latches
                     final_pixel = self._overlay_sprites(bkg_pixel)
                     if final_pixel != self.transparent_color:
                         self.screen.write_at(x=self.pixel - 1, y=self.line, color=final_pixel)
+                    #self.shift_bkg_latches()
                 elif self.pixel == 257:   # pixels 257 - 320
                     # sprite data fetching: fetch data from OAM for sprites on the next scanline
-                    self._prefetch_active_sprites(self.line + 1)
+                    # NOTE:  "evaluation applies to the next line's sprite rendering, ... and this is why
+                    # there is a 1 line offset on a sprite's Y coordinate."
+                    # source: https://wiki.nesdev.com/w/index.php/PPU_sprite_evaluation  (note 1)
+                    # this is implemented by passing line + 1 - 1 == line to the prefetch function for next line
+                    self._prefetch_active_sprites(self.line)
                 elif 321 <= self.pixel <= 336:   # pixels 321 - 336
                     # fill background data latches with data for first two tiles of next scanline
                     if self.pixel % 8 == 1:  # will happen at 321 and 329
                         # fill latches
                         self.shift_bkg_latches()  # move the data from the upper latches into the current ones
                         self.fill_bkg_latches(self.line + 1, int((self.pixel - 321) / 8))  # get some more data for the upper latches
+                    #self.shift_bkg_latches()
                 else:  # pixels 337 - 340
                     # todo: unknown nametable fetches (used by MMC5)
-                    self._bkg_px = 0
+                    pass
 
             if self.line == 0 and self.pixel == 65:
                 # The OAM address is fixed after this point  [citation needed]
                 self._oam_addr_held = self.oam_addr
             elif self.line == 240 and self.pixel == 0:
                 # post-render scanline, ppu is idle
-                # in this emulator, this is when we render the screen
-                # self.render_screen()
                 pass
             elif self.line == 241 and self.pixel == 1:
                 # set vblank flag
@@ -495,7 +503,7 @@ class NESPPU:
                 # trigger NMI (if NMI is enabled)
                 if (self.ppu_ctrl & self.VBLANK_MASK) > 0:
                     self._trigger_nmi()
-            elif self.line <= 260:
+            elif 241 <= self.line <= 260:
                 # during vblank, ppu does no memory accesses; most of the CPU accesses happens here
                 pass
             elif self.line == 261:
@@ -506,7 +514,12 @@ class NESPPU:
                     self.sprite_overflow = False
                 elif self.pixel == 257:
                     # load sprite data for next scanline
-                    self._prefetch_active_sprites(line=0)
+                    # self._prefetch_active_sprites(line=0)
+                    # "Sprite evaluation does not happen on the pre-render scanline. Because evaluation applies to the
+                    # next line's sprite rendering, no sprites will be rendered on the first scanline, and this is why
+                    # there is a 1 line offset on a sprite's Y coordinate."
+                    # source: https://wiki.nesdev.com/w/index.php/PPU_sprite_evaluation  (note 1)
+                    self._active_sprites = []
                 elif 321 <= self.pixel <= 336:
                     # load data for next scanline
                     if self.pixel % 8 == 1:  # will happen at 321 and 329
@@ -518,7 +531,7 @@ class NESPPU:
                     # (do it below all the counter updates below, though)
                     frame_ended=True
 
-            if (self.line==15 and self.pixel==256) or (self.line==239 and self.pixel==256):
+            """if (self.line==15 and self.pixel==256) or (self.line==239 and self.pixel==256):
                 print()
                 print(self.line, self.pixel)
 
@@ -549,6 +562,7 @@ class NESPPU:
                 tile_addr = ntbl_base + tile_row * self.SCREEN_TILE_COLS + tile_col
 
                 print(ntbl_base, tile_addr)
+            """
 
             self.cycles_since_reset += 1
             self.cycles_since_frame += 1
@@ -577,12 +591,7 @@ class NESPPU:
         # get the tile from the nametable
         row = int(line / 8)
 
-
         # x and y coords of the nametable
-        # todo: ny0 is wrong here
-        #nx0, ny0 = bit_high(self.ppu_ctrl, 0), 0 #bit_high(self.ppu_ctrl, 0), bit_high(self.ppu_ctrl, 1)
-
-
         nx0 = bit_high(self._tN, 0)
         ny0 = bit_high(self._tN, 1)
 
@@ -604,12 +613,9 @@ class NESPPU:
         #ntbl_base = self.vram.NAMETABLE_START + (self.ppu_ctrl & self.NAMETABLE_MASK) * self.vram.NAMETABLE_LENGTH_BYTES
         #tile_addr = ntbl_base + row * self.SCREEN_TILE_COLS + col
 
-        try:
-            tile_index = self.vram.read(tile_addr)
-        except:
-            print(row, total_row, "x", col, total_col, ":", (ny * 2 + nx), (self.ppu_ctrl & self.NAMETABLE_MASK))
 
-            pass
+        tile_index = self.vram.read(tile_addr)
+        #print(row, total_row, "x", col, total_col, ":", (ny * 2 + nx), (self.ppu_ctrl & self.NAMETABLE_MASK))
 
         tile_bank = (self.ppu_ctrl & self.BKG_PATTERN_TABLE_MASK) > 0
         table_base = tile_bank * 0x1000
@@ -624,21 +630,19 @@ class NESPPU:
         mask = 0b00000011 << shift
         palette_id = (attribute_byte & mask) >> shift
 
+        self._palette[0] = self._palette[1]
         self._palette[1] = self.decode_palette(palette_id, is_sprite=False)
 
         tile_line = line - 8 * row
-        self._pattern_lo[1] = self.vram.read(tile_base + tile_line)
-        self._pattern_hi[1] = self.vram.read(tile_base + tile_line + 8)
+        #self._pattern_lo[1] = self.vram.read(tile_base + tile_line)
+        #self._pattern_hi[1] = self.vram.read(tile_base + tile_line + 8)
 
-        #self._pattern_lo = replace_high_byte(self._pattern_lo, self.vram.read(tile_base + tile_line))
-        #self._pattern_hi = replace_high_byte(self._pattern_hi, self.vram.read(tile_base + tile_line + 8))
+        self._pattern_lo = set_low_byte(self._pattern_lo, self.vram.read(tile_base + tile_line))
+        self._pattern_hi = set_low_byte(self._pattern_hi, self.vram.read(tile_base + tile_line + 8))
 
     def shift_bkg_latches(self):
-        self._palette[0] = self._palette[1]
-        self._pattern_lo[0] = self._pattern_lo[1]
-        self._pattern_hi[0] = self._pattern_hi[1]
-        #self._pattern_lo >>= 1
-        #self._pattern_hi >>= 1
+        self._pattern_hi <<= 8
+        self._pattern_lo <<= 8
 
     def _get_bkg_pixel(self):
         # the data we need is in the zero indices of the latches
@@ -646,12 +650,17 @@ class NESPPU:
             or (self.pixel - 1 < 8 and bit_low(self.ppu_mask, self.RENDER_LEFT8_BKG_BIT)):
             return self.transparent_color
 
-        mask = 1 << (7 - (self.pixel - 1) % 8)
-        v = ((self._pattern_lo[0] & mask) > 0) + ((self._pattern_hi[0] & mask) > 0) * 2
+        fine_x = self.ppu_scroll[self.PPU_SCROLL_X] & 0b00000111
 
-        #v = bit_high(0, self._pattern_lo) + bit_high(0, self._pattern_hi) * 2
+        px = (self.pixel - 1) % 8 + fine_x
+        mask = 1 << (15 - px)
+        #v = ((self._pattern_lo[0] & mask) > 0) + ((self._pattern_hi[0] & mask) > 0) * 2
 
-        return self._palette[0][v] if v > 0 else self.transparent_color
+        v = ((self._pattern_lo & mask) > 0) + ((self._pattern_hi & mask) > 0) * 2
+
+        #v = bit_high(15 - fine_x, self._pattern_lo) + bit_high(15 - fine_x, self._pattern_hi) * 2
+
+        return self._palette[int(px / 8)][v] if v > 0 else self.transparent_color
 
     def log_line(self):
         log = "{:5d}, {:3d}, {:3d}   ".format(self.frames_since_reset, self.line, self.pixel)
@@ -845,32 +854,27 @@ Improvements and Corrections
 ----------------------------
   - Critical:  Performance
 
-
-  - Error:  Sprites are (I think) one line high and a few (one?) pixels left of correct (or the background is left/right by a pixel or so)
-             \-- Almost certain bkg or sprites (probably bkg?) are off by 1px based on sprite 0 in SMB (should be under the coin)
-            THINK THIS IS NOW CORRECTED
-
   - Error:  Test failures:
              |-- BRK test failure
              \-- VBlank timing
-  - Error:  SMB status bar last few pixels get scrolled
-             \-- timing error or off-by-one-line error, I think
 
+  - Major:  Code tidy up and comments
   - Major:  Tidy up handling of _tN
   - Major:  Scrolling
-             |-- fine x/y scrolling
+             |-- fine y scrolling
              \-- test y scrolling (coarse and fine)
   - Major:  Test coverage
              |-- try more test ROMS
              \-- automation of some testing
 
   - Medium:  Greyscale mode
-  - Medium:  Open bus behaviour on memory
   - Medium:  Colours boost if ppu_mask bits set
+  - Medium:  Open bus behaviour on memory
 
   - Minor:  Background palette hack
   - Minor:  OAMDATA read behaviour during render
-  - Minor:  Sprite priority quirk
+
+  - Done?:  Sprite priority quirk
 
   - Unknown: Vertical scroll bits reloaded at cycles 280-304 of scanline 261 (see _new_frame())
 

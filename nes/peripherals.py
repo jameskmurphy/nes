@@ -13,7 +13,7 @@ class Screen:
         self.width = width
         self.height = height
         self.scale = scale
-        self.buffer = pygame.Surface((self.width, self.height))
+        self.buffer = pygame.PixelArray(pygame.Surface((self.width, self.height)))
         self.screen = pygame.display.set_mode((self.width * self.scale, self.height * self.scale))
         self.transparent_color = None
 
@@ -29,15 +29,21 @@ class Screen:
         del source
         self.buffer.blit(sfc, dest=(x, y))
 
+    #def blit(self, buf):
+    #    self.buffer.surface.blit_array(buf)
+    #    #self.buffer[0:256, 0:240] = buf
+
     def write_at(self, x, y, color):
-        self.buffer.set_at((x, y), color)
+        #self.buffer.set_at((x, y), color)
+        self.buffer[x, y] = color
 
     def show(self):
-        pygame.transform.scale(self.buffer, (self.width * self.scale, self.height * self.scale), self.screen)
+        pygame.transform.scale(self.buffer.surface, (self.width * self.scale, self.height * self.scale), self.screen)
         pygame.display.flip()
 
     def clear(self, color=(0, 0, 0)):
-        self.buffer.fill(color)
+        #self.buffer.surface.fill(color)
+        self.buffer[0:self.width, 0:self.height] = color
 
 
 class ControllerBase:

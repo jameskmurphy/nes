@@ -1,15 +1,20 @@
+import pyximport; pyximport.install()
+
+
 from .memory import NESVRAM
-from .carts import NESCart0
-from .bitwise import upper_nibble, lower_nibble
+from .cy.carts import NESCart0
+from .bitwise import upper_nibble, lower_nibble, bit_low, bit_high
 
 class ROM:
+    """
+    Class for reading ROM data and generating cartridges from it.
+    """
 
     # header byte 6
-    MIRROR_MASK        = 0b00000001
-    PERSISTENT_MASK    = 0b00000010
-    TRAINER_MASK       = 0b00000100
-    MIRROR_IGNORE_MASK = 0b00001000
-    MAPPER_ID_MASK     = 0b11110000  # shared with header byte 7
+    MIRROR_BIT = 0
+    PERSISTENT_BIT = 1
+    TRAINER_BIT = 2
+    MIRROR_IGNORE_BIT = 3
 
     # header byte 7
     NES2_FORMAT_MASK   = 0b00001100
@@ -40,6 +45,9 @@ class ROM:
             self.load(filename)
 
     def load(self, filename):
+        """
+        Load a ROM in the standard .nes file format
+        """
         with open(filename, "rb") as f:
             nesheader = f.read(16)
             self.decode_header(nesheader)
@@ -52,49 +60,60 @@ class ROM:
                 print("WARNING: MISC ROM DATA IS NOT EMPTY")
 
     def decode_header(self, nesheader):
+        """
+        Decode the standard .nes file format header.  Includes support for NES 2.0 format.
+        """
+        # header bytes 0-3 are fixed to ascii N E S <eof>
+        #if not (nesheader[0] == 'N' and nesheader[1] == 'E' and nesheader[2] == 'S' and nesheader[3] == 0x1A):
+            #raise ValueError("Invalid .nes file header")
+
+        # header bytes 4 and 5
         self.prg_rom_bytes = nesheader[4] * 16384  # in 16kB banks
-        self.chr_rom_bytes = nesheader[5] * 8192  # in 8kB banks
+        self.chr_rom_bytes = nesheader[5] * 8192   # in 8kB banks
 
         # header byte 6
-        self.mirror_pattern = NESVRAM.MIRROR_HORIZONTAL if (nesheader[6] & self.MIRROR_MASK) == 0 \
+        self.mirror_pattern = NESVRAM.MIRROR_HORIZONTAL if bit_low(nesheader[6], self.MIRROR_BIT) \
             else NESVRAM.MIRROR_VERTICAL
-        self.has_persistent = (nesheader[6] & self.PERSISTENT_MASK) > 0
-        self.has_trainer = (nesheader[6] & self.TRAINER_MASK) > 0
-        if (nesheader[6] & self.MIRROR_IGNORE_MASK) > 0:  # if this is set provide 4-page vram
+        self.has_persistent = bit_high(nesheader[6], self.PERSISTENT_BIT)
+        self.has_trainer = bit_high(nesheader[6], self.TRAINER_BIT)
+        if bit_high(nesheader[6], self.MIRROR_IGNORE_BIT):  # if this is set provide 4-page vram todo: current system does not respect this
             self.mirror_pattern = NESVRAM.MIRROR_FOUR_SCREEN
 
-        #self.mapper_id = (nesheader[7] & self.MAPPER_ID_MASK) + ((nesheader[6] & self.MAPPER_ID_MASK) >> 4)
+        # header byte 7
         self.mapper_id = upper_nibble(nesheader[7]) * 16 + upper_nibble(nesheader[6])
         self.nes2 = (nesheader[7] & self.NES2_FORMAT_MASK) > 0
 
         if not self.nes2:
             # header byte 8 (apparently often unused)
-            self.prg_ram_size = min(1, nesheader[8]) * 8192
+            self.prg_ram_bytes = min(1, nesheader[8]) * 8192
         else:
             # NES 2.0 format
             # https://wiki.nesdev.com/w/index.php/NES_2.0
 
             # header byte 8
-            self.mapper_id += lower_nibble(nesheader[8]) * 256   #  (nesheader[8] & 0b00001111) * 256
-            self.submapper_id = upper_nibble(nesheader[8])       #  (nesheader[8] & 0b11110000) >> 4
+            self.mapper_id += lower_nibble(nesheader[8]) * 256
+            self.submapper_id = upper_nibble(nesheader[8])
 
             # header byte 9
-            prg_rom_msb = lower_nibble(nesheader[9])             # (nesheader[9] & 0b00001111)
+            prg_rom_msb = lower_nibble(nesheader[9])
             if prg_rom_msb == 0xF:
                 raise NotImplementedError("NES2 decoding for PRG_ROM_SIZE MSB nibble = 0xF")
-            chr_rom_msb = upper_nibble(nesheader[9])             # nesheader[9] & 0b11110000)
+            chr_rom_msb = upper_nibble(nesheader[9])
             if chr_rom_msb == 0xF:
                 raise NotImplementedError("NES2 decoding for CHR_ROM_SIZE MSB nibble = 0xF")
 
             # header byte 10
-            self.prg_ram_bytes = 64 << lower_nibble(nesheader[10])   #(nesheader[10] & 0b00001111)
-            self.prg_nvram_bytes = 64 << upper_nibble(nesheader[10]) #((nesheader[10] & 0b11110000) >> 4)
+            self.prg_ram_bytes = 64 << lower_nibble(nesheader[10])
+            self.prg_nvram_bytes = 64 << upper_nibble(nesheader[10])
 
             # header byte 11
-            self.chr_ram_bytes = 64 << lower_nibble(nesheader[11])   #(nesheader[11] & 0b00001111)
-            self.chr_nvram_bytes = 64 << upper_nibble(nesheader[11]) #((nesheader[11] & 0b11110000) >> 4)
+            self.chr_ram_bytes = 64 << lower_nibble(nesheader[11])
+            self.chr_nvram_bytes = 64 << upper_nibble(nesheader[11])
 
     def get_cart(self, prg_start):
+        """
+        Get the correct type of cartridge object from this ROM, ready to be plugged into the NES system
+        """
         if self.mapper_id == 0:
             return NESCart0(prg_rom_data=self.prg_rom_data,
                             chr_rom_data=self.chr_rom_data,

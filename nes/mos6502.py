@@ -56,6 +56,8 @@ class MOS6502:
     # cycles taken to do the NMI or IRQ interrupt - (this is a guess, based on BRK, couldn't find a ref for this!)
     INTERRUPT_REQUEST_CYCLES = 7
 
+    OAM_DMA_CPU_CYCLES = 513
+
     def __init__(self, memory, support_BCD=True, undocumented_support_level=1, aax_sets_flags=False, stack_underflow_causes_exception=True):
 
         # memory is user-supplied object with read and write methods, allowing for memory mappers, bank switching, etc.
@@ -244,6 +246,10 @@ class MOS6502:
                                                                                            )
         return str
 
+    def oam_dma_pause(self):
+        cycles = self.OAM_DMA_CPU_CYCLES + self.cycles_since_reset % 2
+        self.cycles_since_reset += cycles
+        return cycles
 
     def set_reset_vector(self, reset_vector):
         """

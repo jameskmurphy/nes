@@ -1,7 +1,4 @@
 
-
-
-
 def load_rom_raw(filename):
     """
     Loads the data from a .nes file as the nesheader and the rom data without further processing

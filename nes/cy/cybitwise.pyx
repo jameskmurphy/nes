@@ -1,46 +1,45 @@
 """
-Some common bitwise manipulations.
+Some common bitwise manipulations.  
 """
 
-
-def set_bit(target, bit):
+cpdef int set_bit(int target, int bit):
     """
     Returns target but with the given bit set to 1
     """
     return target | (1 << bit)
 
-def clear_bit(target, bit):
+cpdef int clear_bit(int target, int bit):
     """
     Returns target but with the given bit set to 0
     """
     return target & ~(1 << bit)
 
-def bit_high(value, bit):
+cpdef int bit_high(int value, int bit):
     """
     Returns whether the bit specified is set high in value
     e.g. bit_high(64, 6) == True    (64 = 0b01000000, so bit 6 is high)
          bit_high(64, 2) == False
     """
-    return value & (1 << bit) > 0
+    return (value >> bit) & 1
 
-def bit_low(value, bit):
+cpdef int bit_low(int value, int bit):
     """
     Returns whether the bit specified is set low in value
     e.g. bit_high(64, 6) == False    (64 = 0b01000000, so bit 6 is high)
          bit_high(64, 2) == True
     """
-    return value & (1 << bit) == 0
+    return ((value >> bit) & 1) == 0
 
 
 ########### Byte operations ############################################################################################
 
-def lower_nibble(value):
+cpdef lower_nibble(char value):
     """
     Returns the value of the lower nibble (4 bits) of a byte (i.e. a value in range 0-15)
     """
     return value & 0x0F
 
-def upper_nibble(value):
+cpdef upper_nibble(char value):
     """
     Returns the value of the upper nibble (4 bits) of a byte (i.e. a value in range 0-15)
     """
@@ -49,14 +48,14 @@ def upper_nibble(value):
 
 ########### Word operations ############################################################################################
 
-def set_high_byte(target, hi_byte):
+cpdef set_high_byte(int target, int hi_byte):
     """
     Sets the high (second least significant) byte of a 16 bit (or longer) target value (*not* a little endian word!) to
     hi_byte
     """
     return (target & 0x00FF) + (hi_byte << 8)
 
-def set_low_byte(target, lo_byte):
+cpdef set_low_byte(int target, int lo_byte):
     """
     Sets the low byte of a 16 bit (or longer) target value (*not* a little endian word!) to lo_byte
     """

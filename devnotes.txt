@@ -1,0 +1,35 @@
+Development Notes
+-----------------
+
+Improvements and Corrections
+----------------------------
+  - Critical:  Performance
+
+  - Error:  Test failures:
+             |-- BRK test failure
+             \-- VBlank timing
+  - Error: Cutting off sprites in top few pixels (SMB)
+             |-- Could be the bkg clear thing
+  - Error: sprites not rendering in first 8 pixels of screen (left) column
+             |-- is this an error or a correct glitch?
+  - Error: sprites overlapping weirdly
+  - Error: SMB crash at start of 1-3, possibly due to scroll problem and sprite 0 hit??
+
+
+  - Major:  Code tidy up and comments
+  - Major:  Scrolling
+             |-- fine y scrolling
+             \-- test y scrolling (coarse and fine)
+  - Major:  Test coverage
+             |-- try more test ROMS
+             \-- automation of testing
+
+  - Medium:  Greyscale mode
+  - Medium:  Colours boost if ppu_mask bits set
+  - Medium:  Open bus behaviour on memory
+
+  - Minor:  Background palette hack
+  - Minor:  OAMDATA read behaviour during render
+
+  - Unknown: "Vertical scroll bits reloaded" at cycles 280-304 of scanline 261 (see _new_frame())
+

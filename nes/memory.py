@@ -3,6 +3,9 @@ import logging
 from nes import LOG_MEMORY
 
 
+OAM_SIZE_BYTES = 256
+
+
 class MemoryBase:
     """
     Basic memory controller interface
@@ -155,9 +158,22 @@ class NESMappedRAM(MemoryBase):
             self.cart.write(address, value)
 
     def run_oam_dma(self, page):
+        """
+        OAM DMA copies an entire page (wrapping at the page boundary if the start address in ppu's oam_addr is not zero)
+        from RAM to ppu OAM.  This also causes the cpu to pause for 513 or 514 cycles.
+        :param page:
+        :return:
+        """
         logging.debug("OAM DMA from page {:02X}".format(page), extra={"source": "mem"})
-        self.ppu.oam[self.ppu.oam_addr:self.ppu.OAM_SIZE_BYTES] = self.read_block(page << 8, self.ppu.OAM_SIZE_BYTES - self.ppu.oam_addr)
-        self.ppu.oam[0:self.ppu.oam_addr] = self.read_block(page << 8, self.ppu.oam_addr)
+        # done in two parts to correctly account for wrapping at page end
+        data_block = bytearray(256)
+        data_block[self.ppu.oam_addr:OAM_SIZE_BYTES] = self.read_block(page << 8, OAM_SIZE_BYTES - self.ppu.oam_addr)
+        data_block[0:self.ppu.oam_addr] = self.read_block(page << 8, self.ppu.oam_addr)
+        self.ppu.write_oam(data_block)
+
+        #self.ppu.oam[self.ppu.oam_addr:OAM_SIZE_BYTES] = self.read_block(page << 8, OAM_SIZE_BYTES - self.ppu.oam_addr)
+        #self.ppu.oam[0:self.ppu.oam_addr] = self.read_block(page << 8, self.ppu.oam_addr)
+        # tell the interrupt listener that the CPU should pause due to OAM DMA
         self.interrupt_listener.raise_oam_dma_pause()
 
 
@@ -171,7 +187,7 @@ class NESVRAM(MemoryBase):
     PATTERN_TABLE_SIZE_BYTES = 4096   # provided by the rom
     NAMETABLES_SIZE_BYTES = 2048
     PALETTE_SIZE_BYTES = 32
-    NAMETABLE_LENGTH_BYTES = 1024  # single nametime is this big   #todo: this name is misleading; is really length of a single nametable in bytes
+    NAMETABLE_LENGTH_BYTES = 1024  # single nametime is this big
 
     # memory map
     NAMETABLE_START = 0x2000
@@ -199,6 +215,7 @@ class NESVRAM(MemoryBase):
         self.nametable_mirror_pattern = cart.nametable_mirror_pattern
 
     def decode_address(self, address):
+        raise ConnectionError("NO")
         if address < self.NAMETABLE_START:
             # pattern table - provided by the rom
             #return self._pattern_table, address

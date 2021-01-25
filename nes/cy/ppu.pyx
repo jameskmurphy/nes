@@ -5,16 +5,10 @@ import pyximport; pyximport.install()
 from nes.cy.memory import NESVRAM
 from nes.cy.cybitwise import bit_high, bit_low, set_bit, clear_bit, set_high_byte, set_low_byte
 
-DEF PALETTE_START = 0x3F00    # todo: figure out how to share these
-DEF NAMETABLE_START = 0x2000
-DEF NAMETABLE_LENGTH_BYTES = 1024  # single nametime is this big
-DEF ATTRIBUTE_TABLE_OFFSET = 0x3C0  # offset of the attribute table from the start of the corresponding nametable
-
-cimport memory
+from memory cimport PALETTE_START, NAMETABLE_START, NAMETABLE_LENGTH_BYTES, ATTRIBUTE_TABLE_OFFSET
 
 #################################### CONSTANTS #########################################################################
 DEF NUM_REGISTERS = 8
-DEF OAM_SIZE_BYTES = 256
 
 # Register indices
 # (this is not just an enum, this is the offset of the register in the CPU memory map from 0x2000)
@@ -110,8 +104,6 @@ cdef class NESPPU:
         [6] Register behaviour: https://wiki.nesdev.com/w/index.php/PPU_registers
         [7] Scrolling: https://wiki.nesdev.com/w/index.php/PPU_scrolling
     """
-
-
     def __init__(self, cart=None, screen=None, interrupt_listener=None):
 
         # Registers

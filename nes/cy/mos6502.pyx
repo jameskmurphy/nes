@@ -9,9 +9,7 @@ from nes.instructions import INSTRUCTION_SET, Instruction, AddressModes
 
 from nes import LOG_CPU
 
-ctypedef int (*ftype)(int, int)
-
-    # Masks for the bits in the status register
+# Masks for the bits in the status register
 DEF SR_N_MASK = 0b10000000  # negative
 DEF SR_V_MASK = 0b01000000  # overflow
 DEF SR_X_MASK = 0b00100000  # unused, but should be set to 1
@@ -21,20 +19,21 @@ DEF SR_I_MASK = 0b00000100  # interrupt disable
 DEF SR_Z_MASK = 0b00000010  # zero
 DEF SR_C_MASK = 0b00000001  # carry
 
-    # some useful memory locations
+# some useful memory locations
 DEF STACK_PAGE = 0x0100           # stack is held on page 1, from 0x0100 to 0x01FF
 DEF IRQ_BRK_VECTOR_ADDR = 0xFFFE  # start of 16 bit location containing the address of the IRQ/BRK interrupt handler
 DEF RESET_VECTOR_ADDR = 0xFFFC    # start of 16 bit location containing the address of the RESET handler
 DEF NMI_VECTOR_ADDR = 0xFFFA      # start of 16 bit location of address of the NMI (non maskable interrupt) handler
 
-    # 6502 is little endian (least significant byte first in 16bit words)
+# 6502 is little endian (least significant byte first in 16bit words)
 DEF LO_BYTE = 0
 DEF HI_BYTE = 1
 
-    # cycles taken to do the NMI or IRQ interrupt - (this is a guess, based on BRK, couldn't find a ref for this!)
+# cycles taken to do the NMI or IRQ interrupt - (this is a guess, based on BRK, couldn't find a ref for this!)
 DEF INTERRUPT_REQUEST_CYCLES = 7
 DEF OAM_DMA_CPU_CYCLES = 513
 
+# Used to represent None for integer arguments in some places
 DEF ARG_NONE = -1
 
 
@@ -67,20 +66,20 @@ cdef class MOS6502:
 
     """
 
-    cdef NESMappedRAM memory
-    cdef object instructions
+    cdef NESMappedRAM memory        # the main memory; important that type is decalared so can use c-calling
+    cdef object instructions        # the instructions in the original python format; still used for logging etc.
 
-    cdef unsigned char A, X, Y
-    cdef int PC, SP
-    cdef int N, V, D, I, Z, C
+    cdef unsigned char A, X, Y      # registers
+    cdef int PC, SP                 # program and stack pointers
+    cdef int N, V, D, I, Z, C       # status bits
 
-    cdef int cycles_since_reset
-    cdef int support_BCD, aax_sets_flags, undocumented_support_level, stack_underflow_causes_exception
+    cdef int cycles_since_reset     # cycles since the processor was reset
+    cdef int aax_sets_flags, undocumented_support_level, stack_underflow_causes_exception
 
     # instruction size data table
     cdef int instr_size_bytes[256]
 
-    def __init__(self, memory, support_BCD=True, undocumented_support_level=1, aax_sets_flags=False, stack_underflow_causes_exception=True):
+    def __init__(self, memory, undocumented_support_level=1, aax_sets_flags=False, stack_underflow_causes_exception=True):
 
         # memory is user-supplied object with read and write methods, allowing for memory mappers, bank switching, etc.
         self.memory = memory
@@ -112,7 +111,6 @@ cdef class MOS6502:
         self.cycles_since_reset = 0
 
         # control behaviour of the cpu
-        self.support_BCD = support_BCD        # todo: remove for the NES
         self.aax_sets_flags = aax_sets_flags
         self.undocumented_support_level = undocumented_support_level
         self.stack_underflow_causes_exception = stack_underflow_causes_exception
@@ -126,7 +124,7 @@ cdef class MOS6502:
         Resets the CPU
         """
         # read the program counter from the RESET_VECTOR_ADDR
-        self.PC = self._from_le(self.memory.read_block(RESET_VECTOR_ADDR, bytes=2))
+        self.PC = self._read_word(RESET_VECTOR_ADDR)
 
         # clear the registers
         self.A = 0  # accumulator
@@ -245,7 +243,9 @@ cdef class MOS6502:
         bytecode = self.memory.read(self.PC)
 
         instr = self.instructions[bytecode]
-        data = self.memory.read_block(self.PC + 1, bytes=instr.size_bytes - 1)
+        data = bytearray(2)
+        for i in range(instr.size_bytes - 1):
+            data[i] = self.memory.read(self.PC + 1 + i)
 
         str += "{0:02X} ".format(bytecode)
         str += "{0:02X} ".format(data[0]) if len(data) > 0 else "   "

@@ -1,26 +1,7 @@
 # cython: profile=True, boundscheck=False, nonecheck=False
 
 import logging
-
 from nes import LOG_MEMORY
-
-DEF OAM_SIZE_BYTES = 256   # todo: should move to a header because is shared with PPU
-
-
-DEF RAM_SIZE = 0x800            # 2kB of internal RAM
-DEF NUM_PPU_REGISTERS = 8       # number of ppu registers
-
-DEF RAM_END = 0x0800            # NES main ram to here
-DEF PPU_END = 0x4000            # PPU registers to here
-DEF APU_END = 0x4018            # APU registers (+OAM DMA reg) to here
-DEF APU_UNUSED_END = 0x4020     # generally unused APU and I/O functionality
-DEF OAM_DMA = 0x4014            # OAM DMA register address
-DEF CONTROLLER1 = 0x4016        # port for controller (read controller 1 / write both controllers)
-DEF CONTROLLER2 = 0x4017        # port for controller 2 (read only, writes to this port go to the APU)
-DEF CART_START = 0x4020         # start of cartridge address space
-
-
-
 
 cdef class MemoryBase:
     """
@@ -32,48 +13,27 @@ cdef class MemoryBase:
     cpdef unsigned char read(self, int address):
         raise NotImplementedError()
 
-    #cpdef void read_block(self, unsigned char* out, address, bytes):
-    #    cdef int i
-    #    for i in range(bytes):
-    #        out[i] = self.read(address + i)
-
-    def read_block(self, address, bytes):
-        rval = bytearray(bytes)
-        for i in range(bytes):
-            rval[i] = self.read(address + i)
-        return rval
-
-
     cpdef void write(self, int address, unsigned char value):
         raise NotImplementedError()
 
-    #cpdef void print(self, int address, int bytes, int width_bytes=16):
-    #    for off in range(bytes):
-    #        if off % width_bytes == 0:
-    #            if off > 0:
-    #                print()
-    #            print("${0:04X}:   ".format(address + off), end="")
-    #        v = self.read(address + off)
-    #        print("{0:02X}".format(v), end=" ")
 
+###### Main Memory #####################################################################################################
 
-class BigEmptyRAM(MemoryBase):
-    """
-    Just a big empty bank of 64kB of RAM
-    """
-    def __init__(self):
-        super().__init__()
-        self.ram = bytearray(2 ** 16)
+from memory cimport RAM_SIZE
+DEF NUM_PPU_REGISTERS = 8       # number of ppu registers
 
-    def read(self, address):
-        return self.ram[address]
+# NES Main memory map locations
+DEF RAM_END = 0x0800            # NES main ram to here
+DEF PPU_END = 0x4000            # PPU registers to here
+DEF APU_END = 0x4018            # APU registers (+OAM DMA reg) to here
+DEF APU_UNUSED_END = 0x4020     # generally unused APU and I/O functionality
+DEF OAM_DMA = 0x4014            # OAM DMA register address
+DEF CONTROLLER1 = 0x4016        # port for controller (read controller 1 / write both controllers)
+DEF CONTROLLER2 = 0x4017        # port for controller 2 (read only, writes to this port go to the APU)
+DEF CART_START = 0x4020         # start of cartridge address space
 
-    def read_block(self, address, bytes):
-        # this is so simple, we can do a more efficient read_block
-        return self.ram[address:(address + bytes)]
-
-    def write(self, address, value):
-        self.ram[address] = value
+# OAM memory size for the DMA transfer
+from ppu cimport OAM_SIZE_BYTES
 
 
 cdef class NESMappedRAM(MemoryBase):
@@ -112,8 +72,6 @@ cdef class NESMappedRAM(MemoryBase):
                 value = 0
             elif address == CONTROLLER1:
                 value = (self.controller1.read_bit() & 0b00011111) + (0x40 & 0b11100000)
-                #print("{:08b}".format(value))
-                #print("{:08b}".format(self._last_bus))
                 # todo: deal with open bus behaviour of upper control lines
             elif address == CONTROLLER2:
                 # todo: deal with open bus behaviour of upper control lines
@@ -123,7 +81,6 @@ cdef class NESMappedRAM(MemoryBase):
                 value = 0
         elif address < APU_UNUSED_END:
             # todo: generally unused APU and I/O functionality
-            #region = "apu-unused"
             value = 0
         else:
             # cartridge space; pass this to the cart, which might do its own mapping
@@ -167,6 +124,7 @@ cdef class NESMappedRAM(MemoryBase):
         :return:
         """
         #logging.debug("OAM DMA from page {:02X}".format(page), extra={"source": "mem"})
+
         # done in two parts to correctly account for wrapping at page end
         cdef unsigned char data_block[OAM_SIZE_BYTES]
         cdef int i, addr_base, oam_addr
@@ -176,36 +134,20 @@ cdef class NESMappedRAM(MemoryBase):
         for i in range(OAM_SIZE_BYTES):
             data_block[(i + oam_addr) & 0xFF] = self.read( addr_base + i )
 
-        self.ppu.write_oam(data_block[:OAM_SIZE_BYTES])  # have to pass with the size here to avoid zero-terminating as if it were a string :(
-
-        #self.read_block(data_block[self.ppu.oam_addr:OAM_SIZE_BYTES], page << 8, OAM_SIZE_BYTES - self.ppu.oam_addr)
-        #self.read_block(data_block[0:self.ppu.oam_addr], page << 8, self.ppu.oam_addr)
-
-        #data_block[self.ppu.oam_addr:OAM_SIZE_BYTES] = self.read_block(page << 8, OAM_SIZE_BYTES - self.ppu.oam_addr)
-        #data_block[0:self.ppu.oam_addr] = self.read_block(page << 8, self.ppu.oam_addr)
-        #self.ppu.write_oam(data_block)
-
-        #self.ppu.oam[self.ppu.oam_addr:OAM_SIZE_BYTES] = self.read_block(page << 8, OAM_SIZE_BYTES - self.ppu.oam_addr)
-        #self.ppu.oam[0:self.ppu.oam_addr] = self.read_block(page << 8, self.ppu.oam_addr)
+        # pass with the size here to avoid zero-terminating as if it were a string
+        self.ppu.write_oam(data_block[:OAM_SIZE_BYTES])
         # tell the interrupt listener that the CPU should pause due to OAM DMA
         self.interrupt_listener.raise_oam_dma_pause()
 
 
-DEF PATTERN_TABLE_SIZE_BYTES = 4096   # provided by the rom
-DEF NAMETABLES_SIZE_BYTES = 2048
-DEF PALETTE_SIZE_BYTES = 32
-DEF NAMETABLE_LENGTH_BYTES = 1024  # single nametime is this big
 
-    # memory map
-DEF NAMETABLE_START = 0x2000
-DEF ATTRIBUTE_TABLE_OFFSET = 0x3C0  # offset of the attribute table from the start of the corresponding nametable
-DEF PALETTE_START = 0x3F00
+###### VRAM ############################################################################################################
 
-    # Mirror patterns
-    # The mirror pattern specifies the underlying nametable at locations 0x2000, 0x2400, 0x2800 and 0x3200
-DEF MIRROR_HORIZONTAL = [0, 0, 1, 1]
-DEF MIRROR_VERTICAL = [0, 1, 0, 1]
-DEF MIRROR_FOUR_SCREEN = [0, 1, 2, 3]
+# Mirror patterns
+# The mirror pattern specifies the underlying nametable at locations 0x2000, 0x2400, 0x2800 and 0x3200
+# DEF MIRROR_HORIZONTAL = [0, 0, 1, 1]
+# DEF MIRROR_VERTICAL = [0, 1, 0, 1]
+# DEF MIRROR_FOUR_SCREEN = [0, 1, 2, 3]
 
 
 cdef class NESVRAM(MemoryBase):
@@ -220,7 +162,7 @@ cdef class NESVRAM(MemoryBase):
         self.cart = cart
         if nametable_size_bytes != NAMETABLES_SIZE_BYTES:
             raise ValueError("Different sized nametables not implemented")
-        # self._pattern_table = bytearray(self.PATTERN_TABLE_SIZE_BYTES)
+        #self._pattern_table = bytearray(self.PATTERN_TABLE_SIZE_BYTES)
         #self._nametables = bytearray(nametable_size_bytes)
         #self.palette_ram = bytearray(PALETTE_SIZE_BYTES)
         self.nametable_mirror_pattern = cart.nametable_mirror_pattern
@@ -231,11 +173,10 @@ cdef class NESVRAM(MemoryBase):
 
         if address < NAMETABLE_START:
             # pattern table - provided by the rom
-            #return self._pattern_table, address
-            value = self.cart.read_ppu(address)  # todo: need something better here via the read_ppu/wrtie_ppu in order to implement mappers
+            value = self.cart.read_ppu(address)
         elif address < PALETTE_START:
             # nametable
-            page = int((address - NAMETABLE_START) / NAMETABLE_LENGTH_BYTES)  # which nametable?
+            page = (address - NAMETABLE_START) / NAMETABLE_LENGTH_BYTES # which nametable?
             offset = (address - NAMETABLE_START) % NAMETABLE_LENGTH_BYTES  # offset in that table
 
             # some of the pages (e.g. 2 and 3) are mirrored, so for these, find the underlying
@@ -256,7 +197,6 @@ cdef class NESVRAM(MemoryBase):
 
         if address < NAMETABLE_START:
             # pattern table - provided by the rom
-            #return self._pattern_table, address
             self.cart.write_ppu(address, value)  # todo: need something better here via the read_ppu/wrtie_ppu in order to implement mappers
         elif address < PALETTE_START:
             # nametable

@@ -1,68 +1,13 @@
 from .memory cimport NESVRAM
 
+### NES PPU Constants ##################################################################################################
 
-#################################### CONSTANTS #########################################################################
-DEF NUM_REGISTERS = 8
-DEF OAM_SIZE_BYTES = 256
-
-# Register indices
-# (this is not just an enum, this is the offset of the register in the CPU memory map from 0x2000)
-DEF PPU_CTRL = 0
-DEF PPU_MASK = 1
-DEF PPU_STATUS = 2
-DEF OAM_ADDR = 3
-DEF OAM_DATA = 4
-DEF PPU_SCROLL = 5
-DEF PPU_ADDR = 6
-DEF PPU_DATA = 7
-
-# masks for the bits in ppu registers
-# ppu_status
-DEF VBLANK_MASK =               0b10000000  # same for ppu_ctrl
-DEF SPRITE0_HIT_MASK =          0b01000000
-DEF SPRITE_OVERFLOW_MASK =      0b00100000
-
-# ppu_ctrl
-DEF SPRITE_SIZE_MASK =          0b00100000
-DEF BKG_PATTERN_TABLE_MASK =    0b00010000
-DEF SPRITE_PATTERN_TABLE_MASK = 0b00001000
-DEF VRAM_INCREMENT_MASK =       0b00000100
-DEF NAMETABLE_MASK =            0b00000011
-
-# ppu_mask
-DEF RENDERING_ENABLED_MASK =    0b00011000
-DEF RENDER_SPRITES_MASK =       0b00010000
-DEF RENDER_BACKGROUND_MASK =    0b00001000
-DEF RENDER_LEFT8_SPRITES_MASK = 0b00000100
-DEF RENDER_LEFT8_BKG_MASK =     0b00000010
-DEF GREYSCALE_MASK =            0b00000001
+# this odd mechanism allows (integer) constants to be shared between pyx files via pxd files, which is a bit neater
+cpdef enum:
+    OAM_SIZE_BYTES = 256
 
 
-# bit numbers of some important bits in registers
-# ppu_status
-DEF V_BLANK_BIT = 7             # same for ppu_ctrl
-
-# ppu mask
-DEF RENDER_LEFT8_BKG_BIT = 1
-DEF RENDER_LEFT8_SPRITES_BIT = 2
-
-# byte numbers in ppu scroll
-DEF PPU_SCROLL_X = 0
-DEF PPU_SCROLL_Y = 1
-
-# screen and sprite/tile sizes:
-DEF PIXELS_PER_LINE = 341       # number of pixels per ppu scanline; only 256 of thes are visible
-DEF SCREEN_HEIGHT_PX = 240      # visible screen height (number of visible rows)
-DEF SCREEN_WIDTH_PX = 256       # visible screen width (number of visible pixels per row)
-DEF TILE_HEIGHT_PX = 8          # height of a tile/standard sprite in pixels
-DEF TILE_WIDTH_PX  = 8          # width of tile/standard sprite in pixels
-DEF SCREEN_TILE_ROWS = 30       # number of rows of background tiles in a single screen
-DEF SCREEN_TILE_COLS = 32       # number of columns of tiles in a single screen
-DEF PATTERN_BITS_PER_PIXEL = 2  # number of bits used to represent each pixel in the patterns
-
-# the total size of a tile in the pattern table in bytes (== 16)
-DEF PATTERN_SIZE_BYTES = TILE_WIDTH_PX * TILE_HEIGHT_PX * PATTERN_BITS_PER_PIXEL / 8
-
+### NES PPU prototype ##################################################################################################
 cdef class NESPPU:
     cdef unsigned char ppu_ctrl, ppu_mask, oam_addr, oam_data, _ppu_data_buffer, _io_latch
     cdef unsigned char ppu_scroll[2]
@@ -99,6 +44,8 @@ cdef class NESPPU:
     cdef int _palette_cache[8][4]
     cdef int _palette_cache_valid[8]
 
+    ########### functions ##############################################
+
     cpdef unsigned char read_register(self, int register)
     cpdef void write_register(self, int register, unsigned char value)
     cpdef int run_cycles(self, int num_cycles)
@@ -106,8 +53,6 @@ cdef class NESPPU:
 
     cdef void precalc_offsets(self)
     cdef void inc_bkg_latches(self)
-
-
     cdef void invalidate_palette_cache(self)
     cdef void _get_non_palette_color(self, int* non_pal_col)
     cdef unsigned char ppu_status(self)

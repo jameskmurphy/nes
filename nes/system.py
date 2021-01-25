@@ -43,8 +43,6 @@ class InterruptListener:
         return self._irq
 
 
-
-
 class NES:
     """
     The NES system itself, combining all of the parts, and the interlinks
@@ -57,7 +55,6 @@ class NES:
         Build a NES and cartridge from the bits and pieces we have lying around plus some rom data!  Also do some things
         like set up logging, etc.
         """
-
         # set up the logger
         self.init_logging(log_file, log_level)
 
@@ -93,7 +90,6 @@ class NES:
 
         # only the memory is connected to the cpu, all access to other devices is done through memory mapping
         self.cpu = MOS6502(memory=self.memory,
-                           support_BCD=False,  # the NES cpu is a MOS6502 workalike that does not support the 6502's decimal modes
                            undocumented_support_level=2,  # a few NES games make use of some more common undocumented instructions
                            stack_underflow_causes_exception=False
                            )

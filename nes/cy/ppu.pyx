@@ -157,7 +157,6 @@ cdef class NESPPU:
         # status used by emulator
         self.cycles_since_reset = 0
         self.frames_since_reset = 0  # need all three counters (not really, but easier) because frame lengths vary
-        self.time_at_new_frame = 0
 
         # memory
         self.vram = NESVRAM(cart=cart)
@@ -319,6 +318,7 @@ cdef class NESPPU:
         if register == PPU_CTRL:
             # write only
             # writes to ppu_ctrl are ignored at first
+
             if self.cycles_since_reset < 29658:
                 return
             # can trigger an immediate NMI if we are in vblank and the (allow) vblank NMI trigger flag is flipped high
@@ -632,10 +632,6 @@ cdef class NESPPU:
         cdef total_row, total_col
         self._row_off = self.ny0 * SCREEN_TILE_ROWS + ((self.ppu_scroll[PPU_SCROLL_Y] & 0b11111000) >> 3)
         self._col_off = self.nx0 * SCREEN_TILE_COLS + ((self.ppu_scroll[PPU_SCROLL_X] & 0b11111000) >> 3)
-
-    cdef void inc_bkg_latches(self):
-        pass
-
 
     cdef void fill_bkg_latches(self, int line, int col):
         """

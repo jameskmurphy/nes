@@ -1,5 +1,6 @@
 import pyximport; pyximport.install()
 
+#from .mos6502 import MOS6502
 from .cy.mos6502 import MOS6502
 #from .memory import NESMappedRAM
 from .cy.memory import NESMappedRAM
@@ -48,7 +49,7 @@ class NES:
     The NES system itself, combining all of the parts, and the interlinks
     """
     PPU_CYCLES_PER_CPU_CYCLE = 3
-    FRAMERATE_FPS = 120
+    FRAMERATE_FPS = 60
 
     def __init__(self, rom_file, screen_scale=3, log_file=None, log_level=None, prg_start=None):
         """
@@ -169,7 +170,6 @@ class NES:
                 if self.interrupt_listener.any_active():
                     # do it this way for speed
                     if self.interrupt_listener.nmi_active:
-                        #print("NMI Triggered")
                         cpu_cycles = self.cpu.trigger_nmi()  # raises an NMI on the CPU, but this does take some CPU cycles
                         # print("CPU PC: {:X}".format(self.cpu.PC))
 

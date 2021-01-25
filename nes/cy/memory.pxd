@@ -10,7 +10,7 @@ cdef class MemoryBase:
 
 ######## NES Main Memoroy #############################################
 
-cpdef enum:
+cdef enum:
     RAM_SIZE = 0x800            # 2kB of internal RAM
 
 cdef class NESMappedRAM(MemoryBase):
@@ -29,7 +29,7 @@ cdef class NESMappedRAM(MemoryBase):
 
 ######## NES VRAM #####################################################
 
-cpdef enum:
+cdef enum:
     PATTERN_TABLE_SIZE_BYTES = 4096   # provided by the rom
     NAMETABLES_SIZE_BYTES = 2048
     PALETTE_SIZE_BYTES = 32

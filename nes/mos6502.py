@@ -58,7 +58,7 @@ class MOS6502:
 
     OAM_DMA_CPU_CYCLES = 513
 
-    def __init__(self, memory, support_BCD=True, undocumented_support_level=1, aax_sets_flags=False, stack_underflow_causes_exception=True):
+    def __init__(self, memory, support_BCD=False, undocumented_support_level=1, aax_sets_flags=False, stack_underflow_causes_exception=True):
 
         # memory is user-supplied object with read and write methods, allowing for memory mappers, bank switching, etc.
         self.memory = memory
@@ -104,7 +104,7 @@ class MOS6502:
         Resets the CPU
         """
         # read the program counter from the RESET_VECTOR_ADDR
-        self.PC = self._from_le(self.memory.read_block(self.RESET_VECTOR_ADDR, bytes=2))
+        self.PC = self._read_word(self.RESET_VECTOR_ADDR)
 
         # clear the registers
         self.A = 0  # accumulator
@@ -278,9 +278,8 @@ class MOS6502:
             byte_lo = self.memory.read(addr)
             byte_hi = self.memory.read(addr & 0xFF00)  # read the second (hi) byte from the start of the page
         else:
-            data = self.memory.read_block(addr, bytes=2)
-            byte_lo = data[0]
-            byte_hi = data[1]
+            byte_lo = self.memory.read(addr)
+            byte_hi = self.memory.read(addr + 1)
         return byte_lo + (byte_hi << 8)
 
     def trigger_nmi(self):
@@ -321,7 +320,13 @@ class MOS6502:
 
         # translate to instruction (+ data if needed)
         instr = self.instructions[bytecode]
-        data = self.memory.read_block(self.PC + 1, bytes=instr.size_bytes - 1)
+        #data = self.memory.read_block(self.PC + 1, bytes=instr.size_bytes - 1)
+        data = bytearray(2)
+        if instr.size_bytes >= 2:
+            data[0] = self.memory.read(self.PC + 1)
+        if instr.size_bytes == 3:
+            data[1] = self.memory.read(self.PC + 2)
+
 
         # upon retrieving the opcode, the 6502 immediately increments PC by the opcode size:
         self._previous_PC = self.PC

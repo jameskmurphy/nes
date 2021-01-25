@@ -194,7 +194,7 @@ class NESPPU:
             else:
                 # just explore the grays, there are only 64 colors in palette, so even all
                 # greys cannot be represented
-                trans_c = (trans_c[0]+1, trans_c[1]+1, trans_c[2]+1)
+                trans_c = (trans_c[0] + 1, trans_c[1] + 1, trans_c[2] + 1)
 
     @property
     def ppu_status(self):

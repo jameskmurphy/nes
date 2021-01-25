@@ -2,6 +2,7 @@ import pyximport; pyximport.install()
 
 
 from .memory import NESVRAM
+#from .carts import NESCart0
 from .cy.carts import NESCart0
 from .bitwise import upper_nibble, lower_nibble, bit_low, bit_high
 
@@ -118,7 +119,7 @@ class ROM:
             return NESCart0(prg_rom_data=self.prg_rom_data,
                             chr_rom_data=self.chr_rom_data,
                             nametable_mirror_pattern=self.mirror_pattern,
-                            prg_start_addr=prg_start
+                            #prg_start_addr=prg_start
                             )
         else:
             print("Mapper {} not currently supported".format(self.mapper_id))

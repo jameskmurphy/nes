@@ -1,20 +1,5 @@
 # cython: profile=True, boundscheck=False, nonecheck=False
 
-from nes.cy.memory cimport MemoryBase
-
-    # CPU memory space
-DEF    RAM_START = 0x6000
-DEF    PRG_ROM_START = 0x8000
-
-    # PPU memory space
-DEF    CHR_ROM_START = 0x0000
-
-
-DEF CART_RAM_SIZE = 8192
-DEF PRG_ROM_SIZE = 32 * 1024
-DEF CHR_MEM_SIZE = 8192
-
-
 cdef class NESCart0:
     """
     Basic NES Cartridge (Type 0 / MMC0).  Consists of up to 8kB RAM, 32kB PRG ROM, 8kB CHR ROM
@@ -31,9 +16,9 @@ cdef class NESCart0:
         for i in range(len(prg_rom_data)):
             self.prg_rom[i] = prg_rom_data[i]
 
-
-        #if len(self.prg_rom) not in [16 * 1024, 32 * 1024]:
-        #    raise ValueError("Cart 0 prg rom size should be 16 or 32kB")
+        self.prg_rom_size = len(prg_rom_data)
+        if self.prg_rom_size not in [16 * 1024, 32 * 1024]:
+            raise ValueError("Cart 0 prg rom size should be 16 or 32kB")
 
         # initialize chr rom from supplied data  (PPU connected)
         # or create ram if there isn't one
@@ -63,7 +48,7 @@ cdef class NESCart0:
             # ram access
             return self.ram[address % CART_RAM_SIZE]
         else:
-            return self.prg_rom[(address - self.prg_start_addr) % PRG_ROM_SIZE]
+            return self.prg_rom[(address - self.prg_start_addr) % self.prg_rom_size]
 
     cpdef void write(self, int address, unsigned char value):
         if address < PRG_ROM_START:
@@ -72,7 +57,7 @@ cdef class NESCart0:
         else:
             # should not be able to write to ROM, write here has no effect
             print("WARNING: OVERWRITING PRG ROM")
-            self.prg_rom[(address - self.prg_start_addr) % PRG_ROM_SIZE] = value
+            self.prg_rom[(address - self.prg_start_addr) % self.prg_rom_size] = value
 
     cpdef unsigned char read_ppu(self, int address):
         return self.chr_mem[address % CHR_MEM_SIZE]

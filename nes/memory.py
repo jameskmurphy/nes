@@ -215,7 +215,6 @@ class NESVRAM(MemoryBase):
         self.nametable_mirror_pattern = cart.nametable_mirror_pattern
 
     def decode_address(self, address):
-        raise ConnectionError("NO")
         if address < self.NAMETABLE_START:
             # pattern table - provided by the rom
             #return self._pattern_table, address

@@ -3,7 +3,8 @@ from .memory cimport NESVRAM
 ### NES PPU Constants ##################################################################################################
 
 # this odd mechanism allows (integer) constants to be shared between pyx files via pxd files, which is a bit neater
-cpdef enum:
+# if these constants also need to be used from python use cpdef in place of cdef here
+cdef enum:
     OAM_SIZE_BYTES = 256
 
 
@@ -52,7 +53,6 @@ cdef class NESPPU:
     cpdef void write_oam(self, unsigned char* data)
 
     cdef void precalc_offsets(self)
-    cdef void inc_bkg_latches(self)
     cdef void invalidate_palette_cache(self)
     cdef void _get_non_palette_color(self, int* non_pal_col)
     cdef unsigned char ppu_status(self)

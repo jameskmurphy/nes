@@ -7,7 +7,7 @@ cdef class NESCart0:
     def __init__(self, prg_rom_data=None, chr_rom_data=None, ram_size_kb=8, prg_start_addr=None, nametable_mirror_pattern=[0,0,1,1]):
         super().__init__()
 
-        # initialize ram (CPU connected)
+        # initialize ram (CPU connected) 
         if ram_size_kb not in [2, 4, 8]:
             raise ValueError("Cart 0 ram size should be 2, 4 or 8kB")
         #self.ram = bytearray(ram_size_kb * 1024)

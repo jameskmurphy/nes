@@ -104,7 +104,7 @@ cdef class NESPPU:
         [6] Register behaviour: https://wiki.nesdev.com/w/index.php/PPU_registers
         [7] Scrolling: https://wiki.nesdev.com/w/index.php/PPU_scrolling
     """
-    def __init__(self, cart=None, screen=None, interrupt_listener=None):
+    def __init__(self, cart=None, interrupt_listener=None):
 
         # Registers
         self.ppu_ctrl = 0
@@ -135,8 +135,6 @@ cdef class NESPPU:
         # some state used in rendering to tell us where on the screen we are drawing
         self.line = 0
         self.pixel = 0
-        self.row = 0
-        self.col = 0
 
         # background latches
         self.nx0 = 0
@@ -162,9 +160,6 @@ cdef class NESPPU:
         self.vram = NESVRAM(cart=cart)
         #self.oam = bytearray(OAM_SIZE_BYTES)
 
-        # screen attached to PPU
-        self.screen = screen
-
         # interrupt listener
         self.interrupt_listener = interrupt_listener
 
@@ -173,18 +168,11 @@ cdef class NESPPU:
         self.set_hex_palette()
         self.transparent_color = -1
 
-        #self._get_non_palette_color(self.transparent_color)
-
         self._palette_cache_valid[:] = [0, 0, 0, 0, 0, 0, 0, 0]
-
-        # tell the screen what rgb value the ppu is using to represent transparency
-        if self.screen:
-            self.screen.transparent_color = self.transparent_color
 
     def set_hex_palette(self):
         for i, c in enumerate(self.rgb_palette):
             self.hex_palette[i] = (c[0] << 16) + (c[1] << 8) + c[2]
-
 
     @property
     def in_vblank(self):
@@ -258,11 +246,11 @@ cdef class NESPPU:
 
         if register == PPU_CTRL:
             # write only
-            print("WARNING: reading i/o latch")
+            #print("WARNING: reading i/o latch")
             return self._io_latch
         elif register == PPU_MASK:
             # write only
-            print("WARNING: reading i/o latch")
+            #print("WARNING: reading i/o latch")
             return self._io_latch
         elif register == PPU_STATUS:
             # clear ppu_scroll and ppu_addr latches
@@ -274,7 +262,7 @@ cdef class NESPPU:
             return v
         elif register == OAM_ADDR:
             # write only
-            print("WARNING: reading i/o latch")
+            #print("WARNING: reading i/o latch")
             return self._io_latch
         elif register == OAM_DATA:
             # todo: does not properly implement the weird results of this read during rendering
@@ -283,11 +271,11 @@ cdef class NESPPU:
             return v
         elif register == PPU_SCROLL:
             # write only
-            print("WARNING: reading i/o latch")
+            #print("WARNING: reading i/o latch")
             return self._io_latch
         elif register == PPU_ADDR:
             # write only
-            print("WARNING: reading i/o latch")
+            #print("WARNING: reading i/o latch")
             return self._io_latch
         elif register == PPU_DATA:
             if self.ppu_addr < PALETTE_START:
@@ -391,12 +379,21 @@ cdef class NESPPU:
                 self.invalidate_palette_cache()
 
     cdef void _clear_to_bkg(self):
-        cdef int cc
+        cdef int cc, x, y
         cdef int p0[4]
         self.decode_palette(p0, 0)
         cc = (self.rgb_palette[p0[0]][0] << 16) + (self.rgb_palette[p0[0]][1] << 8) + self.rgb_palette[p0[0]][2]
         self.bkg_color = cc
-        self.screen.clear(cc)
+
+        for x in range(SCREEN_WIDTH_PX):
+            for y in range(SCREEN_HEIGHT_PX):
+                self.screen_buffer[x][y] = cc
+
+    cpdef copy_screen_buffer_to(self, unsigned int[:, :] dest):
+        # create a memory view to the screen to allow it to be treated as a buffer in the Numpy-esque style
+        cdef unsigned int[:, :] scr_mv = <unsigned int[:SCREEN_WIDTH_PX,:SCREEN_HEIGHT_PX]>self.screen_buffer
+        dest[:,:] = scr_mv[:,:]
+
 
     cdef void _increment_vram_address(self):
         """
@@ -532,10 +529,11 @@ cdef class NESPPU:
     cdef int _run_cycles(self, int num_cycles):
         # cycles correspond to screen pixels during the screen-drawing phase of the ppu
         # there are three ppu cycles per cpu cycles, at least on NTSC systems
-        cdef int frame_ended, cyc
+        cdef int frame_ended, vblank_started, cyc
         cdef int bkg_pixel, final_pixel, cc
 
         frame_ended = False
+        vblank_started = False
         for cyc in range(num_cycles):
             # current scanline of the frame we are on - this determines behaviour during the line
             if self.line <= 239 and (self.ppu_mask & RENDERING_ENABLED_MASK) > 0:
@@ -545,14 +543,15 @@ cdef class NESPPU:
                     if (self.pixel - 1) % 8 == 0 and self.pixel > 1:
                         # fill background data latches
                         # todo: this is not cycle-correct, since the read is done atomically at the eighth pixel rather than throughout the cycle.
-                        self.fill_bkg_latches(self.line, self.col + 1)   # get some more data for the upper latches
+                        self.fill_bkg_latches(self.line, (self.pixel - 1) / 8 + 1)   # get some more data for the upper latches
 
                     # render background from latches
                     bkg_pixel = self._get_bkg_pixel()
                     # overlay srpite from latches
                     final_pixel = self._overlay_sprites(bkg_pixel)
                     if final_pixel != self.transparent_color:
-                        self.screen.write_at(x=self.pixel - 1, y=self.line, color=self.hex_palette[final_pixel])
+                        self.screen_buffer[self.pixel - 1][self.line] = self.hex_palette[final_pixel]
+                        #self.screen.write_at(x=self.pixel - 1, y=self.line, color=self.hex_palette[final_pixel])
                 elif self.pixel == 257:   # pixels 257 - 320
                     # sprite data fetching: fetch data from OAM for sprites on the next scanline
                     # NOTE:  "evaluation applies to the next line's sprite rendering, ... and this is why
@@ -568,7 +567,7 @@ cdef class NESPPU:
                     # todo: unknown nametable fetches (used by MMC5)
                     pass
 
-            if self.line == 1 and self.pixel == 0:
+            if self.line == 0 and self.pixel==0:
                 self._clear_to_bkg()
 
             if self.line == 0 and self.pixel == 65:
@@ -579,6 +578,7 @@ cdef class NESPPU:
                 pass
             elif self.line == 241 and self.pixel == 1:
                 # set vblank flag
+                vblank_started = True   # this is used by the emulator to know when it can flip the screen
                 self.in_vblank = True   # set the vblank flag in ppu_status register
                 # trigger NMI (if NMI is enabled)
                 if (self.ppu_ctrl & VBLANK_MASK) > 0:
@@ -613,20 +613,15 @@ cdef class NESPPU:
 
             self.cycles_since_reset += 1
             self.pixel += 1
-            if self.pixel > 1 and self.pixel % 8 == 1:
-                self.col += 1
             if self.pixel >= PIXELS_PER_LINE:
                 self.line += 1
                 self.pixel = 0
-                self.col = 0
-                if self.line > 0 and self.line % 8 == 0:
-                    self.row += 1
 
             if frame_ended:
                 self._new_frame()
 
             #logging.log(LOG_PPU, self.log_line(), extra={"source": "PPU"})
-        return frame_ended
+        return vblank_started
 
     cdef void precalc_offsets(self):
         cdef total_row, total_col
@@ -645,8 +640,10 @@ cdef class NESPPU:
         self._pattern_hi <<= 8
         self._pattern_lo <<= 8
 
+        line_plus_scroll_y = line + (self.ppu_scroll[PPU_SCROLL_Y] & 0b00000111)
+
         # get the tile from the nametable
-        row = line / 8
+        row = line_plus_scroll_y / 8
         if row != self._last_row:
             # this will often be repeated in sequence, so can cache them
             total_row = row + self._row_off
@@ -680,7 +677,7 @@ cdef class NESPPU:
             self._palette[0][i] = self._palette[1][i]
         self.decode_palette(self._palette[1], palette_id, is_sprite=False)
 
-        tile_line = line % 8
+        tile_line = line_plus_scroll_y % 8
 
         self._pattern_lo = set_low_byte(self._pattern_lo, self.vram.read(tile_base + tile_line))
         self._pattern_hi = set_low_byte(self._pattern_hi, self.vram.read(tile_base + tile_line + 8))
@@ -719,8 +716,6 @@ cdef class NESPPU:
         self.frames_since_reset += 1
         self.pixel = 0
         self.line = 0
-        self.row = 0
-        self.col = 0
 
         #logging.log(logging.INFO, "PPU frame {} starting".format(self.frames_since_reset), extra={"source": "PPU"})
         # todo: "Vertical scroll bits are reloaded if rendering is enabled" - don't know what this means

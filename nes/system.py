@@ -9,6 +9,7 @@ from .cy.ppu import NESPPU
 from .rom import ROM
 from .peripherals import Screen, KeyboardController, ControllerBase
 from nes import LOG_CPU, LOG_PPU, LOG_MEMORY
+import pickle
 
 import logging
 
@@ -66,9 +67,6 @@ class NES:
         # affects the actual hardware configuration of the system.
         self.cart = rom.get_cart(prg_start)
 
-        # screen has no dependencies
-        self.screen = Screen(scale=screen_scale)
-
         # game controllers have no dependencies
         self.controller1 = KeyboardController()
         self.controller2 = ControllerBase(active=False)   # connect a second gamepad, but make it inactive for now
@@ -76,9 +74,11 @@ class NES:
         # the interrupt listener here is not a NES hardware device, it is an interrupt handler that is used to pass
         # interrupts between the PPU and CPU in this emulator
         self.interrupt_listener = InterruptListener()
-        self.ppu = NESPPU(cart=self.cart,
-                          screen=self.screen,
-                          interrupt_listener=self.interrupt_listener)
+        self.ppu = NESPPU(cart=self.cart, interrupt_listener=self.interrupt_listener)
+
+        # screen needs to have the PPU
+        self.screen = Screen(ppu=self.ppu, scale=screen_scale)
+        self.screen_scale = screen_scale
 
         # due to memory mapping, lots of things are connected to the main memory
         self.memory = NESMappedRAM(ppu=self.ppu,
@@ -118,6 +118,35 @@ class NES:
                             )
         logging.root.setLevel(log_level)
 
+    def __getstate__(self):
+        state = (self.cart, self.controller1, self.controller2, self.interrupt_listener, self.cpu, self.memory, self.screen_scale)
+        return state
+
+    def __setstate__(self, state):
+        self.cart, self.controller1, self.controller2, self.interrupt_listener, self.cpu, self.memory, self.screen_scale = state
+        self.screen = Screen(scale=self.screen_scale)
+
+    def save(self):
+        tmp1 = self.screen.buffer
+        tmp2 = self.screen.screen
+        tmp3 = self.screen.font
+
+        self.screen.buffer = None
+        self.screen.screen = None
+        self.screen.font = None
+        with open("test.p", "wb") as f:
+            pickle.dump(self, f, protocol=4)
+
+        self.screen.buffer = tmp1
+        self.screen.screen = tmp2
+        self.screen.font = tmp3
+
+    @staticmethod
+    def load(file):
+        with open(file, "rb") as f:
+            nes = pickle.load(f)
+        nes.screen._special_init()
+        return nes
 
     def step(self):
         """
@@ -160,13 +189,11 @@ class NES:
         pygame.init()
         clock = pygame.time.Clock()
 
-        in_vbl = False
-        vbl_cycles = 0
-        vbl_cycles_ppu = 0
+        show_hud = True
 
         while True:
-            frame_ended=False
-            while not frame_ended:
+            vblank_started=False
+            while not vblank_started:
                 if self.interrupt_listener.any_active():
                     # do it this way for speed
                     if self.interrupt_listener.nmi_active:
@@ -189,37 +216,31 @@ class NES:
                 else:
                     cpu_cycles = self.cpu.run_next_instr()
 
-                # print(cpu_cycles, self.ppu.line, self.ppu.pixel)
-                frame_ended = self.ppu.run_cycles(cpu_cycles * self.PPU_CYCLES_PER_CPU_CYCLE)
-
-                ####### DEBUG AND REPORTING ############################################################################
-                #if not in_vbl and self.ppu.in_vblank:
-                #    print("vbl start")
-                #    in_vbl = True
-                #    vbl_cycles = self.cpu.cycles_since_reset
-                #    vbl_cycles_ppu = self.ppu.cycles_since_reset
-                #elif in_vbl and self.ppu.line==261 and self.ppu.pixel > 1:
-                #    print("vblank period (cpu, ppu cycles): ", self.cpu.cycles_since_reset - vbl_cycles, self.ppu.cycles_since_reset-vbl_cycles_ppu)
-                #    in_vbl = False
-
-                #if 0 <= self.ppu.line <= 30:
-                #    logging.info(self.cpu.log_line(), extra={"source": "cpu"})
-                #    logging.info(self.ppu.log_line(), extra={"source": "ppu"})
-                ####### DEBUG AND REPORTING  (end) #####################################################################
+                vblank_started = self.ppu.run_cycles(cpu_cycles * self.PPU_CYCLES_PER_CPU_CYCLE)
 
             # update the controllers once per frame
             self.controller1.update()
             self.controller2.update()
-            self.screen.show()
+
+            fps = clock.get_fps()
+            if show_hud:
+                self.screen.add_text("{:.0f} fps".format(clock.get_fps()), (10, 10), (0, 255, 0) if fps > 55 else (255, 0, 0))
 
             # Check for an exit
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     pygame.quit()
                     return
+                elif event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_1:
+                        show_hud = not show_hud
+                    if event.key == pygame.K_0:
+                        self.save()
+                        self.screen.add_text("saved", (100, 10), (255, 128, 0))
 
+            self.screen.show()
             clock.tick(self.FRAMERATE_FPS)
-            print("frame end:  {:.1f} fps".format(clock.get_fps()))
+            #print("frame end:  {:.1f} fps".format(clock.get_fps()))
 
 
 

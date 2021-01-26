@@ -2,7 +2,7 @@ from .memory cimport NESVRAM
 
 ### NES PPU Constants ##################################################################################################
 
-# this odd mechanism allows (integer) constants to be shared between pyx files via pxd files, which is a bit neater
+# this odd mechanism allows (integer) constants to be shared between pyx files via pxd files
 # if these constants also need to be used from python use cpdef in place of cdef here
 cdef enum:
     OAM_SIZE_BYTES = 256
@@ -10,40 +10,41 @@ cdef enum:
 
 ### NES PPU prototype ##################################################################################################
 cdef class NESPPU:
-    cdef unsigned char ppu_ctrl, ppu_mask, oam_addr, oam_data, _ppu_data_buffer, _io_latch
-    cdef unsigned char ppu_scroll[2]
-    cdef unsigned int _oam_addr_held, ppu_addr, _ppu_byte_latch
+    cdef:
+        unsigned char ppu_ctrl, ppu_mask, oam_addr, oam_data, _ppu_data_buffer, _io_latch
+        unsigned char ppu_scroll[2]
+        unsigned int _oam_addr_held, ppu_addr, _ppu_byte_latch
 
-    cdef int _palette[2][4]
-    cdef unsigned int _pattern_lo, _pattern_hi
+        int _palette[2][4]
+        unsigned int _pattern_lo, _pattern_hi
 
-    cdef unsigned char oam[OAM_SIZE_BYTES]
-    cdef unsigned char _oam[32]
-    cdef list _sprite_pattern          # this might be inefficient
-    cdef unsigned char _sprite_bkg_priority[8]
-    cdef list _active_sprites
+        unsigned char oam[OAM_SIZE_BYTES]
+        unsigned char _oam[32]
+        list _sprite_pattern          # this might be inefficient
+        unsigned char _sprite_bkg_priority[8]
+        list _active_sprites
 
-    cdef int line, pixel, row, col
+        # track current screen position.  Screen drawing starts at pixel 1 (not 0) and runs to pixel 256.
+        int line, pixel
 
-    # used in bkg latch precalc
-    cdef unsigned char nx0, ny0, _nx, _ny, _tile_row, _tile_col, _row_off, _col_off, _last_row
+        # used in bkg latch precalc
+        unsigned char nx0, ny0, _nx, _ny, _tile_row, _tile_col, _row_off, _col_off, _last_row
 
-    cdef int in_vblank, sprite_zero_hit, sprite_overflow
+        int in_vblank, sprite_zero_hit, sprite_overflow
 
-    cdef int cycles_since_reset, frames_since_reset, time_at_new_frame
+        int cycles_since_reset, frames_since_reset, time_at_new_frame
 
-    cdef NESVRAM vram
-    cdef object screen
-    cdef object interrupt_listener
+        NESVRAM vram
+        object interrupt_listener
 
-    cdef int screen_buffer[256][240]
+        unsigned int screen_buffer[256][240]
 
-    cdef int rgb_palette[64][3]
-    cdef int hex_palette[64]
-    cdef int transparent_color, bkg_color
+        int rgb_palette[64][3]
+        int hex_palette[64]
+        int transparent_color, bkg_color
 
-    cdef int _palette_cache[8][4]
-    cdef int _palette_cache_valid[8]
+        int _palette_cache[8][4]
+        int _palette_cache_valid[8]
 
     ########### functions ##############################################
 
@@ -51,6 +52,7 @@ cdef class NESPPU:
     cpdef void write_register(self, int register, unsigned char value)
     cpdef int run_cycles(self, int num_cycles)
     cpdef void write_oam(self, unsigned char* data)
+    cpdef copy_screen_buffer_to(self, unsigned int[:, :] dest)
 
     cdef void precalc_offsets(self)
     cdef void invalidate_palette_cache(self)

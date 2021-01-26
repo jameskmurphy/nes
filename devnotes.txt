@@ -7,16 +7,35 @@ Improvements and Corrections
              |-- BRK test failure
              \-- VBlank timing
   - Error: Cutting off sprites in top few pixels (SMB)
-             |-- Could be the bkg clear thing
   - Error: sprites not rendering in first 8 pixels of screen (left) column
-             |-- is this an error or a correct glitch?
+             |-- is this an error or a correct glitch? Or deliberate (see flag)
   - Error: sprites overlapping weirdly
 
+  - New: APU and audio!
+             |-- APU code
+             \-- playing sound (peripheral)
+  - New: Mappers
+             |-- UxROM
+             |-- MMC 1
+             \-- MMC 3
+  - New: Save / load emulator state
+  - New: Record keypresses
+  - New: Replay keypresses
+  - New: run frame by frame
+             |-- take input keypresses
+             \-- Output frame bitmap
 
+  - Major:  Performance
+             |-- Background latches!
+             |-- System -> Cython
+             |-- Could move more of run_instr -> meta
+             \-- Screen write from buffer
   - Major:  Code tidy up and comments
-  - Major:  Scrolling
-             |-- fine y scrolling
-             \-- test y scrolling (coarse and fine)
+             |-- Tidy up pxd headers and constants
+             |-- Localize class variables related to bkg latches if not needed
+             |-- Tidy up PPU code
+             |-- Tidy up unused code in ppu
+             \-- initialize cython arrays
   - Major:  Test coverage
              |-- try more test ROMS
              \-- automation of testing
@@ -29,4 +48,5 @@ Improvements and Corrections
   - Minor:  OAMDATA read behaviour during render
 
   - Unknown: "Vertical scroll bits reloaded" at cycles 280-304 of scanline 261 (see _new_frame())
+             \-- I think this is from PPU scroll; v latch reloads bits from t latch at new frame, I think
 

@@ -2,13 +2,16 @@ import logging
 from nes.system import NES
 from nes import LOG_CPU, LOG_PPU
 
-#nes = NES("./roms/Super Mario Bros.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+nes = NES("./roms/Super Mario Bros.nes", log_file="./logs/nes.log", log_level=logging.INFO)
 #nes = NES("./roms/Balloon_fight.nes", log_file="./logs/nes.log", log_level=logging.INFO)
-nes = NES("./roms/donkey kong.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+#nes = NES("./roms/donkey kong.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+# nes = NES("./roms/Ice Climber.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+
+#nes = NES.load("test.p")
 
 # Test ROMS
 
-# nes = NES("./tests/nestest/nestest.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+# nes = NES("./tests/nestest/nestest.  nes", log_file="./logs/nes.log", log_level=logging.INFO)
 
 # passed
 # nes = NES("./tests/instr_test-v5/rom_singles/01-basics.nes", log_file="./logs/nes.log", log_level=logging.INFO)

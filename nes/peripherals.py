@@ -1,6 +1,7 @@
 import logging
 
 import pygame
+import pygame.freetype
 
 
 class Screen:
@@ -9,41 +10,39 @@ class Screen:
     Keep all PyGame-specific stuff in here (don't want PyGame specific stuff all over the rest of the code)
     """
 
-    def __init__(self, width=256, height=240, scale=3):
+    def __init__(self, ppu, width=256, height=240, scale=3):
+        self.ppu = ppu
         self.width = width
         self.height = height
         self.scale = scale
-        self.buffer = pygame.PixelArray(pygame.Surface((self.width, self.height)))
+
+        # screens and buffers
+        self.buffer_surf = pygame.Surface((self.width, self.height))
+        self.buffer_sa = pygame.surfarray.pixels2d(self.buffer_surf)
         self.screen = pygame.display.set_mode((self.width * self.scale, self.height * self.scale))
-        self.transparent_color = None
 
-    def render_tile(self, x, y, tile):
-        # todo:  this works, but could be prohibitively slow?
-        tile_height = len(tile)
-        sfc = pygame.Surface((8, tile_height))
-        sfc.set_colorkey(self.transparent_color)
-        source = pygame.PixelArray(sfc)
-        for yy in range(tile_height):
-            # todo: there should be a better way to do this without a loop
-            source[0:8, yy] = tile[yy]
-        del source
-        self.buffer.blit(sfc, dest=(x, y))
+        # font for writing to HUD
+        pygame.freetype.init()
+        self.font = pygame.freetype.SysFont(pygame.font.get_default_font(), 24)
+        self._text_buffer = []
 
-    #def blit(self, buf):
-    #    self.buffer.surface.blit_array(buf)
-    #    #self.buffer[0:256, 0:240] = buf
+    def add_text(self, text, position, color):
+        self._text_buffer.append((text, position, color))
 
-    def write_at(self, x, y, color):
-        #self.buffer.set_at((x, y), color)
-        self.buffer[x, y] = color
+    def _render_text(self, surf):
+        for (text, position, color) in self._text_buffer:
+            self.font.render_to(surf, position, text, color)
 
     def show(self):
-        pygame.transform.scale(self.buffer.surface, (self.width * self.scale, self.height * self.scale), self.screen)
+        self.ppu.copy_screen_buffer_to(self.buffer_sa)
+        #pygame.transform.scale(self.buffer.surface, (self.width * self.scale, self.height * self.scale), self.screen)
+        pygame.transform.scale(self.buffer_surf, (self.width * self.scale, self.height * self.scale), self.screen)
+        self._render_text(self.screen)
         pygame.display.flip()
+        self._text_buffer = []
 
     def clear(self, color=(0, 0, 0)):
-        #self.buffer.surface.fill(color)
-        self.buffer[0:self.width, 0:self.height] = color
+        self.buffer_surf.fill(color)
 
 
 class ControllerBase:
@@ -67,17 +66,6 @@ class ControllerBase:
     NAMES = ['A', 'B', 'select', 'start', 'up', 'down', 'left', 'right']
 
     NUM_BUTTONS = 8
-
-    DEFAULT_KEY_MAP = {
-        pygame.K_w: UP,
-        pygame.K_a: LEFT,
-        pygame.K_s: DOWN,
-        pygame.K_d: RIGHT,
-        pygame.K_g: SELECT,
-        pygame.K_h: START,
-        pygame.K_l: B,
-        pygame.K_p: A,
-    }
 
     def __init__(self, active=True):
         self.is_pressed = [0] * 8   # array to store key status

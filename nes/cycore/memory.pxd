@@ -1,5 +1,5 @@
 from .ppu cimport NESPPU
-from .carts cimport NESCart0
+from .carts cimport NESCart
 
 ######## memory base ##################################################
 
@@ -18,7 +18,7 @@ cdef class NESMappedRAM(MemoryBase):
     cdef unsigned char _last_bus
     cdef NESPPU ppu
     cdef object apu, controller1, controller2, interrupt_listener
-    cdef NESCart0 cart
+    cdef NESCart cart
 
     ###### functions ##########################
     cpdef unsigned char read(self, int address)
@@ -43,9 +43,11 @@ cdef enum:
 cdef class NESVRAM(MemoryBase):
     cdef unsigned char _nametables[NAMETABLES_SIZE_BYTES]
     cdef unsigned char palette_ram[PALETTE_SIZE_BYTES]
-    cdef NESCart0 cart
+    cdef NESCart cart
     cdef int nametable_mirror_pattern[4]
 
     ###### functions ##########################
     cpdef unsigned char read(self, int address)
     cpdef void write(self, int address, unsigned char value)
+
+    cdef _set_nametable_mirror_pattern(self)

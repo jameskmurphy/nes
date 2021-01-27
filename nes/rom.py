@@ -1,10 +1,10 @@
 import pyximport; pyximport.install()
 
 
-from .memory import NESVRAM
+from .cycore.memory import NESVRAM
 #from .carts import NESCart0
-from .cy.carts import NESCart0
-from .bitwise import upper_nibble, lower_nibble, bit_low, bit_high
+from .cycore.carts import NESCart0
+from .cycore.bitwise import upper_nibble, lower_nibble, bit_low, bit_high
 
 class ROM:
     """
@@ -19,6 +19,12 @@ class ROM:
 
     # header byte 7
     NES2_FORMAT_MASK   = 0b00001100
+
+    # mirror patterns
+    # The mirror pattern specifies the underlying nametable at locations 0x2000, 0x2400, 0x2800 and 0x3200
+    MIRROR_HORIZONTAL = [0, 0, 1, 1]
+    MIRROR_VERTICAL = [0, 1, 0, 1]
+    MIRROR_FOUR_SCREEN = [0, 1, 2, 3]
 
     def __init__(self, filename):
         self.prg_rom_bytes = None
@@ -73,12 +79,14 @@ class ROM:
         self.chr_rom_bytes = nesheader[5] * 8192   # in 8kB banks
 
         # header byte 6
-        self.mirror_pattern = NESVRAM.MIRROR_HORIZONTAL if bit_low(nesheader[6], self.MIRROR_BIT) \
-            else NESVRAM.MIRROR_VERTICAL
+        self.mirror_pattern = self.MIRROR_HORIZONTAL if bit_low(nesheader[6], self.MIRROR_BIT) \
+            else self.MIRROR_VERTICAL
         self.has_persistent = bit_high(nesheader[6], self.PERSISTENT_BIT)
         self.has_trainer = bit_high(nesheader[6], self.TRAINER_BIT)
-        if bit_high(nesheader[6], self.MIRROR_IGNORE_BIT):  # if this is set provide 4-page vram todo: current system does not respect this
-            self.mirror_pattern = NESVRAM.MIRROR_FOUR_SCREEN
+        if bit_high(nesheader[6], self.MIRROR_IGNORE_BIT):  # if this is set, cart must provide 4-page vram
+            self.mirror_pattern = self.MIRROR_FOUR_SCREEN
+            # todo: Not implemented!
+            raise NotImplementedError("Four screen mirror patter / nametables not currently supported")
 
         # header byte 7
         self.mapper_id = upper_nibble(nesheader[7]) * 16 + upper_nibble(nesheader[6])
@@ -119,7 +127,6 @@ class ROM:
             return NESCart0(prg_rom_data=self.prg_rom_data,
                             chr_rom_data=self.chr_rom_data,
                             nametable_mirror_pattern=self.mirror_pattern,
-                            #prg_start_addr=prg_start
                             )
         else:
             print("Mapper {} not currently supported".format(self.mapper_id))

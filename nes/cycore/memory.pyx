@@ -19,7 +19,6 @@ cdef class MemoryBase:
 
 ###### Main Memory #####################################################################################################
 
-from memory cimport RAM_SIZE
 DEF NUM_PPU_REGISTERS = 8       # number of ppu registers
 
 # NES Main memory map locations
@@ -45,7 +44,6 @@ cdef class NESMappedRAM(MemoryBase):
     """
     def __init__(self, ppu=None, apu=None, cart=None, controller1=None, controller2=None, interrupt_listener=None):
         super().__init__()
-        #self.ram = bytearray(RAM_SIZE)  # 2kb of internal RAM
         self.ppu = ppu
         self.apu = apu
         self.cart = cart
@@ -143,13 +141,6 @@ cdef class NESMappedRAM(MemoryBase):
 
 ###### VRAM ############################################################################################################
 
-# Mirror patterns
-# The mirror pattern specifies the underlying nametable at locations 0x2000, 0x2400, 0x2800 and 0x3200
-# DEF MIRROR_HORIZONTAL = [0, 0, 1, 1]
-# DEF MIRROR_VERTICAL = [0, 1, 0, 1]
-# DEF MIRROR_FOUR_SCREEN = [0, 1, 2, 3]
-
-
 cdef class NESVRAM(MemoryBase):
     """
     NES video (PPU) RAM, following the PPU memory map pattern
@@ -161,11 +152,14 @@ cdef class NESVRAM(MemoryBase):
         super().__init__()
         self.cart = cart
         if nametable_size_bytes != NAMETABLES_SIZE_BYTES:
+            # There are a few carts that can provide extra nametable space, but that is not yet supported
             raise ValueError("Different sized nametables not implemented")
-        #self._pattern_table = bytearray(self.PATTERN_TABLE_SIZE_BYTES)
-        #self._nametables = bytearray(nametable_size_bytes)
-        #self.palette_ram = bytearray(PALETTE_SIZE_BYTES)
-        self.nametable_mirror_pattern = cart.nametable_mirror_pattern
+        self._set_nametable_mirror_pattern()
+
+    cdef _set_nametable_mirror_pattern(self):
+        cdef int i
+        for i in range(4):
+            self.nametable_mirror_pattern[i] = self.cart.nametable_mirror_pattern[i]
 
     cpdef unsigned char read(self, int address):
         cdef unsigned char value

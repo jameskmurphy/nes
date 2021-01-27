@@ -1,11 +1,11 @@
 import pyximport; pyximport.install()
 
-#from .mos6502 import MOS6502
-from .cy.mos6502 import MOS6502
-#from .memory import NESMappedRAM
-from .cy.memory import NESMappedRAM
-#from .ppu import NESPPU
-from .cy.ppu import NESPPU
+#from .pycore.mos6502 import MOS6502
+from .cycore.mos6502 import MOS6502
+#from .pycore.memory import NESMappedRAM
+from .cycore.memory import NESMappedRAM
+#from .pycore..ppu import NESPPU
+from .cycore.ppu import NESPPU
 from .rom import ROM
 from .peripherals import Screen, KeyboardController, ControllerBase
 from nes import LOG_CPU, LOG_PPU, LOG_MEMORY
@@ -177,9 +177,9 @@ class NES:
             cpu_cycles = self.cpu.run_next_instr()
 
         #print(cpu_cycles, self.ppu.line, self.ppu.pixel)
-        frame_ended = self.ppu.run_cycles(cpu_cycles * self.PPU_CYCLES_PER_CPU_CYCLE)
+        vblank_started = self.ppu.run_cycles(cpu_cycles * self.PPU_CYCLES_PER_CPU_CYCLE)
         #print(cpu_cycles, self.ppu.line, self.ppu.pixel)
-        return frame_ended
+        return vblank_started
 
     def run(self):
         """

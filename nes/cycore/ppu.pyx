@@ -2,8 +2,8 @@
 
 import pyximport; pyximport.install()
 
-from nes.cy.memory import NESVRAM
-from nes.cy.cybitwise import bit_high, bit_low, set_bit, clear_bit, set_high_byte, set_low_byte
+from nes.cycore.memory import NESVRAM
+from nes.cycore.bitwise import bit_high, bit_low, set_bit, clear_bit, set_high_byte, set_low_byte
 
 from memory cimport PALETTE_START, NAMETABLE_START, NAMETABLE_LENGTH_BYTES, ATTRIBUTE_TABLE_OFFSET
 

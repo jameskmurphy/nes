@@ -6,16 +6,17 @@ Improvements and Corrections
   - Error:  Test failures:
              |-- BRK test failure
              \-- VBlank timing
-  - Error: Cutting off sprites in top few pixels (SMB)
-  - Error: sprites not rendering in first 8 pixels of screen (left) column
-             |-- is this an error or a correct glitch? Or deliberate (see flag)
-  - Error: sprites overlapping weirdly
+  - (Error): Cutting off sprites in top few pixels (SMB)
+             \-- think this is okay
+  - (Error): sprites not rendering in first 8 pixels of screen (left) column
+             \-- think this is okay
+  - Error:  Got a crash on SMB due to missing status bar (no s0 hit)
+             \-- cannot reliably reproduce, but has happened a few times - timing problem with scroll?
 
   - New: APU and audio!
              |-- APU code
              \-- playing sound (peripheral)
   - New: Mappers
-             |-- UxROM
              |-- MMC 1
              \-- MMC 3
   - New: Save / load emulator state
@@ -23,13 +24,12 @@ Improvements and Corrections
   - New: Replay keypresses
   - New: run frame by frame
              |-- take input keypresses
-             \-- Output frame bitmap
+             \-- output frame bitmap
 
   - Major:  Performance
              |-- Background latches!
              |-- System -> Cython
-             |-- Could move more of run_instr -> meta
-             \-- Screen write from buffer
+             \-- Could move more of run_instr -> meta
   - Major:  Code tidy up and comments
              |-- Tidy up pxd headers and constants
              |-- Localize class variables related to bkg latches if not needed
@@ -40,6 +40,7 @@ Improvements and Corrections
              |-- try more test ROMS
              \-- automation of testing
 
+  - Medium:  Bus conflict emulation for UNROM (Mapper 2)
   - Medium:  Greyscale mode
   - Medium:  Colours boost if ppu_mask bits set
   - Medium:  Open bus behaviour on memory

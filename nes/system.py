@@ -216,6 +216,8 @@ class NES:
                 else:
                     cpu_cycles = self.cpu.run_next_instr()
 
+                #print(self.cpu.log_line())
+
                 vblank_started = self.ppu.run_cycles(cpu_cycles * self.PPU_CYCLES_PER_CPU_CYCLE)
 
             # update the controllers once per frame

@@ -1,9 +1,9 @@
 from collections import namedtuple
-from enum import Enum, unique
+from enum import Enum
 
 Instruction = namedtuple("Instruction",
-                         ["bytecode", "size_bytes", "cycles", "name", "mode", "function", "operand"],
-                         defaults = [None, None, None, None, None, None, None]
+                         ["bytecode", "size_bytes", "cycles", "name", "mode", "function"],
+                         defaults = [None, None, None, None, None, None]
                          )
 
 InstructionSet = namedtuple("InstructionSet",
@@ -75,7 +75,7 @@ INSTRUCTION_SET = {
                           modes={AddressModes.RELATIVE:   Instruction(bytecode=0xD0, size_bytes=2, cycles=2.12)}),
     "BPL": InstructionSet(name="bpl",
                           modes={AddressModes.RELATIVE:   Instruction(bytecode=0x10, size_bytes=2, cycles=2.12)}),
-    # note that the size of BRK is somewhat controversial, because BRK forces PC+2 to be pushed onto the stack,
+    # note that the size of BRK is slightly controversial, because BRK forces PC+2 to be pushed onto the stack,
     # meaning that the instruction immediately after BRK will never be executed unless there is a workaround applied
     # therefore BRK should usually be followed by NOP, and many assemblers seem to do this
     "BRK": InstructionSet(name="brk",

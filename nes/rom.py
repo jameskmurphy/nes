@@ -3,14 +3,13 @@ import pyximport; pyximport.install()
 
 from .cycore.memory import NESVRAM
 #from .carts import NESCart0
-from .cycore.carts import NESCart0
+from .cycore.carts import NESCart0, NESCart2
 from .cycore.bitwise import upper_nibble, lower_nibble, bit_low, bit_high
 
 class ROM:
     """
     Class for reading ROM data and generating cartridges from it.
     """
-
     # header byte 6
     MIRROR_BIT = 0
     PERSISTENT_BIT = 1
@@ -95,10 +94,11 @@ class ROM:
         if not self.nes2:
             # header byte 8 (apparently often unused)
             self.prg_ram_bytes = min(1, nesheader[8]) * 8192
+            print("iNES (v1) Header")
         else:
             # NES 2.0 format
             # https://wiki.nesdev.com/w/index.php/NES_2.0
-
+            print("NES 2.0 Header")
             # header byte 8
             self.mapper_id += lower_nibble(nesheader[8]) * 256
             self.submapper_id = upper_nibble(nesheader[8])
@@ -119,6 +119,8 @@ class ROM:
             self.chr_ram_bytes = 64 << lower_nibble(nesheader[11])
             self.chr_nvram_bytes = 64 << upper_nibble(nesheader[11])
 
+        print("Mapper: {}".format(self.mapper_id))
+
     def get_cart(self, prg_start):
         """
         Get the correct type of cartridge object from this ROM, ready to be plugged into the NES system
@@ -128,5 +130,11 @@ class ROM:
                             chr_rom_data=self.chr_rom_data,
                             nametable_mirror_pattern=self.mirror_pattern,
                             )
+        elif self.mapper_id == 2:
+            return NESCart2(prg_rom_data=self.prg_rom_data,
+                            chr_rom_data=self.chr_rom_data,
+                            nametable_mirror_pattern=self.mirror_pattern,
+                            )
+
         else:
             print("Mapper {} not currently supported".format(self.mapper_id))

@@ -11,6 +11,13 @@ class Screen:
     """
 
     def __init__(self, ppu, width=256, height=240, scale=3):
+        """
+
+        :param ppu:
+        :param width:
+        :param height:
+        :param scale:
+        """
         self.ppu = ppu
         self.width = width
         self.height = height

@@ -75,6 +75,7 @@ cdef class NESCart2(NESCart0):
     # memory allocation can be avoided, making the code simpler and safer.  And 32kB is not too much memory to waste.
     cdef unsigned char banked_prg_rom[M2_MAX_PRG_BANKS][M2_PRG_ROM_BANK_SIZE]
     cdef unsigned char prg_bank, num_prg_banks
+    cdef int emulate_bus_conflicts   # whether or not to emulate bus conflicts
 
     cdef unsigned char read(self, int address)
     cdef void write(self, int address, unsigned char value)

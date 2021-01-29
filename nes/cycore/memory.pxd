@@ -1,5 +1,7 @@
 from .ppu cimport NESPPU
 from .carts cimport NESCart
+from .system cimport InterruptListener
+
 
 ######## memory base ##################################################
 
@@ -10,15 +12,16 @@ cdef class MemoryBase:
 
 ######## NES Main Memoroy #############################################
 
-cdef enum:
+cpdef enum:
     RAM_SIZE = 0x800            # 2kB of internal RAM
 
 cdef class NESMappedRAM(MemoryBase):
     cdef unsigned char ram[RAM_SIZE]
     cdef unsigned char _last_bus
     cdef NESPPU ppu
-    cdef object apu, controller1, controller2, interrupt_listener
     cdef NESCart cart
+    cdef InterruptListener interrupt_listener
+    cdef object apu, controller1, controller2
 
     ###### functions ##########################
     cpdef unsigned char read(self, int address)

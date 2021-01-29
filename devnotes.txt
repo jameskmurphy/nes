@@ -4,14 +4,18 @@ Development Notes
 Improvements and Corrections
 ----------------------------
   - Error:  Test failures:
-             |-- BRK test failure
-             \-- VBlank timing
+              |-- BRK test failure
+              \-- VBlank timing
   - (Error): Cutting off sprites in top few pixels (SMB)
-             \-- think this is okay
+              \-- think this is okay
   - (Error): sprites not rendering in first 8 pixels of screen (left) column
-             \-- think this is okay
+              \-- think this is okay
   - Error:  Got a crash on SMB due to missing status bar (no s0 hit)
-             \-- cannot reliably reproduce, but has happened a few times - timing problem with scroll?
+              |-- cannot reliably reproduce, but has happened a few times - timing problem with scroll?
+              \-- got this after waiting for a long time (couple of games); related to below?
+  - Error:  Some sort of strange corruption in Duck Tales
+              |-- nametable / scroll got messed up, patterns (e.g. text) were also corrupted
+              \-- happens after waiting a long time (about 400s, so time is at about 100) before starting
 
   - New: APU and audio!
              |-- APU code
@@ -29,6 +33,7 @@ Improvements and Corrections
   - Major:  Performance
              |-- Background latches!
              |-- System -> Cython
+             |-- Check Cython / Python interaction (yellow lines)
              \-- Could move more of run_instr -> meta
   - Major:  Code tidy up and comments
              |-- Tidy up pxd headers and constants
@@ -40,7 +45,6 @@ Improvements and Corrections
              |-- try more test ROMS
              \-- automation of testing
 
-  - Medium:  Bus conflict emulation for UNROM (Mapper 2)
   - Medium:  Greyscale mode
   - Medium:  Colours boost if ppu_mask bits set
   - Medium:  Open bus behaviour on memory

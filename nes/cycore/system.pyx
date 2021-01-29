@@ -1,13 +1,15 @@
+# cython: profile=True, boundscheck=False, nonecheck=False
+
 import pyximport; pyximport.install()
 
 #from .pycore.mos6502 import MOS6502
-from .cycore.mos6502 import MOS6502
+from nes.cycore.mos6502 import MOS6502
 #from .pycore.memory import NESMappedRAM
-from .cycore.memory import NESMappedRAM
+from nes.cycore.memory import NESMappedRAM
 #from .pycore..ppu import NESPPU
-from .cycore.ppu import NESPPU
-from .rom import ROM
-from .peripherals import Screen, KeyboardController, ControllerBase
+from nes.cycore.ppu import NESPPU
+from nes.rom import ROM
+from nes.peripherals import Screen, KeyboardController, ControllerBase
 from nes import LOG_CPU, LOG_PPU, LOG_MEMORY
 import pickle
 
@@ -15,42 +17,39 @@ import logging
 
 import pygame
 
-class InterruptListener:
+cdef class InterruptListener:
     def __init__(self):
         self._nmi = False
         self._irq = False   # the actual IRQ line on the 6502 rests high and is low-triggered
         self.oam_dma_pause = False
 
-    def raise_nmi(self):
+    cdef void raise_nmi(self):
         self._nmi = True
 
-    def reset_nmi(self):
+    cdef void reset_nmi(self):
         self._nmi = False
 
-    def reset_oam_dma_pause(self):
+    cdef void reset_oam_dma_pause(self):
         self.oam_dma_pause = False
 
-    def raise_oam_dma_pause(self):
+    cdef void raise_oam_dma_pause(self):
         self.oam_dma_pause = True
 
-    def any_active(self):
+    cdef int any_active(self):
         return self._nmi or self._irq or self.oam_dma_pause
 
-    @property
-    def nmi_active(self):
+    cdef int nmi_active(self):
         return self._nmi
 
-    @property
-    def irq_active(self):
+    cdef int irq_active(self):
         return self._irq
 
 
-class NES:
+cdef class NES:
     """
     The NES system itself, combining all of the parts, and the interlinks
     """
-    PPU_CYCLES_PER_CPU_CYCLE = 3
-    FRAMERATE_FPS = 240
+    FRAMERATE_FPS = 480
 
     def __init__(self, rom_file, screen_scale=3, log_file=None, log_level=None, prg_start=None):
         """
@@ -137,15 +136,16 @@ class NES:
         nes.screen._special_init()
         return nes
 
-    def step(self):
+    cdef int step(self):
         """
         The heartbeat of the system.  Run one instruction on the CPU and the corresponding amount of cycles on the
         PPU (three per CPU cycle, at least on NTSC systems).
         """
+        cdef int cpu_cycles=0
+
         if self.interrupt_listener.any_active():
             # do it this way for speed
-            if self.interrupt_listener.nmi_active:
-                print("NMI Triggered")
+            if self.interrupt_listener.nmi_active():
                 cpu_cycles = self.cpu.trigger_nmi()  # raises an NMI on the CPU, but this does take some CPU cycles
                 #print("CPU PC: {:X}".format(self.cpu.PC))
 
@@ -154,27 +154,27 @@ class NES:
                 # NMI anyway.  Electronics lend themselves to edge-triggered events, whereas software is more naturally
                 # pulse triggered in some ways (a thing happens then returns).
                 self.interrupt_listener.reset_nmi()
-            elif self.interrupt_listener.irq_active:
+            elif self.interrupt_listener.irq_active():
                 raise NotImplementedError("IRQ is not implemented")
             elif self.interrupt_listener.oam_dma_pause:
                 # https://wiki.nesdev.com/w/index.php/PPU_OAM#DMA
                 cpu_cycles = self.cpu.oam_dma_pause()
-                #cpu_cycles = self.OAM_DMA_CPU_CYCLES + self.cpu.cycles_since_reset % 2
-                #self.cpu.cycles_since_reset += cpu_cycles  #todo: should we do this - don't think it matters
                 self.interrupt_listener.reset_oam_dma_pause()
         else:
             cpu_cycles = self.cpu.run_next_instr()
 
         #print(cpu_cycles, self.ppu.line, self.ppu.pixel)
-        vblank_started = self.ppu.run_cycles(cpu_cycles * self.PPU_CYCLES_PER_CPU_CYCLE)
+        vblank_started = self.ppu.run_cycles(cpu_cycles * PPU_CYCLES_PER_CPU_CYCLE)
         #print(cpu_cycles, self.ppu.line, self.ppu.pixel)
         return vblank_started
 
-    def run(self):
+    cpdef void run(self):
         """
         Run the NES indefinitely (or until some quit signal); this will only exit on quit.
         There is some PyGame specific stuff in here in order to handle frame timing and checking for exits
         """
+        cdef int vblank_started, show_hud
+
         pygame.init()
         clock = pygame.time.Clock()
 
@@ -183,31 +183,7 @@ class NES:
         while True:
             vblank_started=False
             while not vblank_started:
-                if self.interrupt_listener.any_active():
-                    # do it this way for speed
-                    if self.interrupt_listener.nmi_active:
-                        cpu_cycles = self.cpu.trigger_nmi()  # raises an NMI on the CPU, but this does take some CPU cycles
-                        # print("CPU PC: {:X}".format(self.cpu.PC))
-
-                        # should we do this here or leave this up to the triggerer?  It's really up to the triggerer to put the NMI
-                        # line into its "off" position, but if the line remains in the same state the CPU will not trigger another
-                        # NMI anyway.  Electronics lend themselves to edge-triggered events, whereas software is more naturally
-                        # pulse triggered in some ways (a thing happens then returns).
-                        self.interrupt_listener.reset_nmi()
-                    elif self.interrupt_listener.irq_active:
-                        raise NotImplementedError("IRQ is not implemented")
-                    elif self.interrupt_listener.oam_dma_pause:
-                        # https://wiki.nesdev.com/w/index.php/PPU_OAM#DMA
-                        cpu_cycles = self.cpu.oam_dma_pause()
-                        # cpu_cycles = self.OAM_DMA_CPU_CYCLES + self.cpu.cycles_since_reset % 2
-                        # self.cpu.cycles_since_reset += cpu_cycles  #todo: should we do this - don't think it matters
-                        self.interrupt_listener.reset_oam_dma_pause()
-                else:
-                    cpu_cycles = self.cpu.run_next_instr()
-
-                #print(self.cpu.log_line())
-
-                vblank_started = self.ppu.run_cycles(cpu_cycles * self.PPU_CYCLES_PER_CPU_CYCLE)
+                vblank_started = self.step()
 
             # update the controllers once per frame
             self.controller1.update()

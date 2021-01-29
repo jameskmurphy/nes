@@ -1,0 +1,8 @@
+cdef int set_bit(int target, int bit)
+cdef int clear_bit(int target, int bit)
+cdef int bit_high(int value, int bit)
+cdef int bit_low(int value, int bit)
+cdef lower_nibble(char value)
+cdef upper_nibble(char value)
+cdef set_high_byte(int target, int hi_byte)
+cdef set_low_byte(int target, int lo_byte)

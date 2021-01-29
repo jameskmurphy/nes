@@ -1,10 +1,7 @@
 import pyximport; pyximport.install()
 
-
-from .cycore.memory import NESVRAM
-#from .carts import NESCart0
 from .cycore.carts import NESCart0, NESCart2
-from .cycore.bitwise import upper_nibble, lower_nibble, bit_low, bit_high
+from .pycore.bitwise import upper_nibble, lower_nibble, bit_low, bit_high
 
 class ROM:
     """

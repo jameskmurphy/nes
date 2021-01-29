@@ -9,34 +9,6 @@ from nes.instructions import INSTRUCTION_SET, Instruction, AddressModes
 
 from nes import LOG_CPU
 
-# Masks for the bits in the status register
-DEF SR_N_MASK = 0b10000000  # negative
-DEF SR_V_MASK = 0b01000000  # overflow
-DEF SR_X_MASK = 0b00100000  # unused, but should be set to 1
-DEF SR_B_MASK = 0b00010000  # the "break" flag (indicates BRK was executed, only set on the stack copy)
-DEF SR_D_MASK = 0b00001000  # decimal
-DEF SR_I_MASK = 0b00000100  # interrupt disable
-DEF SR_Z_MASK = 0b00000010  # zero
-DEF SR_C_MASK = 0b00000001  # carry
-
-# some useful memory locations
-DEF STACK_PAGE = 0x0100           # stack is held on page 1, from 0x0100 to 0x01FF
-DEF IRQ_BRK_VECTOR_ADDR = 0xFFFE  # start of 16 bit location containing the address of the IRQ/BRK interrupt handler
-DEF RESET_VECTOR_ADDR = 0xFFFC    # start of 16 bit location containing the address of the RESET handler
-DEF NMI_VECTOR_ADDR = 0xFFFA      # start of 16 bit location of address of the NMI (non maskable interrupt) handler
-
-# 6502 is little endian (least significant byte first in 16bit words)
-DEF LO_BYTE = 0
-DEF HI_BYTE = 1
-
-# cycles taken to do the NMI or IRQ interrupt - (this is a guess, based on BRK, couldn't find a ref for this!)
-DEF INTERRUPT_REQUEST_CYCLES = 7
-DEF OAM_DMA_CPU_CYCLES = 513
-
-# Used to represent None for integer arguments in some places
-DEF ARG_NONE = -1
-
-
 cdef class MOS6502:
     """
     Software emulator for MOS Technologies 6502 CPU
@@ -65,20 +37,6 @@ cdef class MOS6502:
        [16] Undocumented opcodes: http://hitmen.c02.at/files/docs/c64/NoMoreSecrets-NMOS6510UnintendedOpcodes-20162412.pdf
 
     """
-
-    cdef NESMappedRAM memory        # the main memory; important that type is decalared so can use c-calling
-    cdef object instructions        # the instructions in the original python format; still used for logging etc.
-
-    cdef unsigned char A, X, Y      # registers
-    cdef int PC, SP                 # program and stack pointers
-    cdef int N, V, D, I, Z, C       # status bits
-
-    cdef int cycles_since_reset     # cycles since the processor was reset
-    cdef int aax_sets_flags, undocumented_support_level, stack_underflow_causes_exception
-
-    # instruction size data table
-    cdef int instr_size_bytes[256]
-
     def __init__(self, memory, undocumented_support_level=1, aax_sets_flags=False, stack_underflow_causes_exception=True):
 
         # memory is user-supplied object with read and write methods, allowing for memory mappers, bank switching, etc.
@@ -124,7 +82,7 @@ cdef class MOS6502:
         Resets the CPU
         """
         # read the program counter from the RESET_VECTOR_ADDR
-        self.PC = self._read_word(RESET_VECTOR_ADDR)
+        self.PC = self._read_word(RESET_VECTOR_ADDR, wrap_at_page=False)
 
         # clear the registers
         self.A = 0  # accumulator
@@ -148,7 +106,8 @@ cdef class MOS6502:
         # reset takes 7 cycles [9]
         self.cycles_since_reset = 7
 
-    def oam_dma_pause(self):
+    cdef int oam_dma_pause(self):
+        cdef int cycles
         cycles = OAM_DMA_CPU_CYCLES + self.cycles_since_reset % 2
         self.cycles_since_reset += cycles
         return cycles
@@ -188,7 +147,7 @@ cdef class MOS6502:
                                                                )
         return instructions
 
-    cpdef void make_instruction_data_tables(self):
+    cdef void make_instruction_data_tables(self):
         """
         Fills in some data tables about the instructions in cdef variables; replaces the more pythonic version
         make_bytecode_dict.
@@ -258,7 +217,7 @@ cdef class MOS6502:
         str += "A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X} PPU:---,--- CYC:{:d}".format(self.A,
                                                                                            self.X,
                                                                                            self.Y,
-                                                                                           self._status_to_byte(),
+                                                                                           self._status_to_byte(b_flag=0),
                                                                                            self.SP,
                                                                                            self.cycles_since_reset
                                                                                            )
@@ -273,7 +232,7 @@ cdef class MOS6502:
         self.memory.write(RESET_VECTOR_ADDR, reset_vector & 0x00FF)  # low byte
         self.memory.write(RESET_VECTOR_ADDR + 1, (reset_vector & 0xFF00) >> 8)  # high byte
 
-    cpdef int _from_le(self, unsigned char* data):
+    cdef int _from_le(self, unsigned char* data):
         """
         Create an integer from a little-endian two byte array
         :param data: two-byte little endian array
@@ -281,11 +240,13 @@ cdef class MOS6502:
         """
         return (data[HI_BYTE] << 8) + data[LO_BYTE]
 
-    cdef int _read_word(self, int addr, int wrap_at_page=False):
+    cdef int _read_word(self, int addr, int wrap_at_page):
         """
         Read a word at an address and return it as an integer
         If wrap_at_page is True then if the address is 0xppFF, then the word will be read from 0xppFF and 0xpp00
         """
+        cdef unsigned char byte_lo, byte_hi
+
         if wrap_at_page and (addr & 0xFF) == 0xFF:
             # will wrap at page boundary
             byte_lo = self.memory.read(addr)
@@ -296,29 +257,29 @@ cdef class MOS6502:
             byte_hi = self.memory.read(addr + 1)
         return byte_lo + (byte_hi << 8)
 
-    cpdef int trigger_nmi(self):
+    cdef int trigger_nmi(self):
         """
         Trigger a non maskable interrupt (NMI)
         """
-        self._interrupt(NMI_VECTOR_ADDR)
+        self._interrupt(NMI_VECTOR_ADDR, is_brk=False)
         self.cycles_since_reset += INTERRUPT_REQUEST_CYCLES
         return INTERRUPT_REQUEST_CYCLES
 
-    cpdef int trigger_irq(self):
+    cdef int trigger_irq(self):
         """
         Trigger a maskable hardware interrupt (IRQ); if interrupt disable bit (self.I) is set, ignore
         """
         if not self.I:
-            self._interrupt(IRQ_BRK_VECTOR_ADDR)
+            self._interrupt(IRQ_BRK_VECTOR_ADDR, is_brk=False)
             self.cycles_since_reset += INTERRUPT_REQUEST_CYCLES
             return INTERRUPT_REQUEST_CYCLES
         else:
             return 0  # ignored!
 
-    cpdef int run_next_instr(self):
-        return self._run_next_instr()
+    #cpdef int run_next_instr(self):
+    #    return self._run_next_instr()
 
-    cdef int _run_next_instr(self):
+    cdef int run_next_instr(self):
         """
         Decode and run the next instruction at the program counter, updating the number of processor
         cycles that have elapsed.  Instructions are taken as atomic, since the 6502 will complete them
@@ -342,7 +303,7 @@ cdef class MOS6502:
         self.cycles_since_reset += cycles
         return cycles
 
-    cdef unsigned char _status_to_byte(self, int b_flag=0):
+    cdef unsigned char _status_to_byte(self, int b_flag):
         """
         Puts the status register into an 8-bit value.  Bit 6 is set high always, bit 5 (the "B flag") is set according
         to the b_flag argument.  This should be high if called from an instruction (PHP or BRK) instruction, low if
@@ -490,55 +451,55 @@ cdef class MOS6502:
         #    print("no jump")
         return extra_cycles
 
-    cdef int _bcc(self, int offset, _):
+    cdef int _bcc(self, int offset, int _):
         """
         Branch on carry clear
         """
         return self._jump_relative(not self.C, offset)
 
-    cdef int _bcs(self, int offset, _):
+    cdef int _bcs(self, int offset, int _):
         """
         Branch on carry set
         """
         return self._jump_relative(self.C, offset)
 
-    cdef int _beq(self, int offset, _):
+    cdef int _beq(self, int offset, int _):
         """
         Branch if zero flag is set
         """
         return self._jump_relative(self.Z, offset)
 
-    cdef int _bit(self, int addr, _):
+    cdef int _bit(self, int addr, int _):
         """
         Manipulates the status register by setting the N and V flags to those bits of the value in the address
         given, and sets the zero flag if A & v == 0
         """
-        cpdef unsigned char v
+        cdef unsigned char v
         v = self.memory.read(addr)
         self.N = (v & SR_N_MASK) > 0
         self.V = (v & SR_V_MASK) > 0
         self.Z = (self.A & v) == 0
 
-    cdef int _bmi(self, int offset, _):
+    cdef int _bmi(self, int offset, int _):
         """
         Branch on result minus (i.e. negative flag N is set)
         """
         return self._jump_relative(self.N, offset)
 
-    cdef int _bne(self, int offset, _):
+    cdef int _bne(self, int offset, int _):
         """
         Branch if zero flag is not set
         """
         return self._jump_relative(not self.Z, offset)
 
-    cdef int _bpl(self, int offset, _):
+    cdef int _bpl(self, int offset, int _):
         """
         Branch on result positive (i.e. negative flag N is not set)
         """
         #print(self.N, not self.N)
         return self._jump_relative(not self.N, offset)
 
-    cdef _interrupt(self, int interrupt_vector, int is_brk=False):
+    cdef _interrupt(self, int interrupt_vector, int is_brk):
         """
         Interrupt routine, followed (with variations) by NMI, IRQ and BRK
           1)
@@ -554,7 +515,7 @@ cdef class MOS6502:
         sr = self._status_to_byte(b_flag=True if is_brk else False)
         self.push_stack(sr)
         #addr = self._from_le(self.memory.read_block(interrupt_vector, bytes=2))
-        addr = self._read_word(interrupt_vector)
+        addr = self._read_word(interrupt_vector, wrap_at_page=False)
         self.PC = addr
         if not is_brk:
             # if this is not a brk instruction, set the interrupt disable flag
@@ -604,7 +565,7 @@ cdef class MOS6502:
         self.I = False
         return 0
 
-    cpdef int _clv(self, int _, int __):
+    cdef int _clv(self, int _, int __):
         """
         Clear value flag (set V:=0)
         """
@@ -669,7 +630,7 @@ cdef class MOS6502:
         self._set_zn(self.X)
         return 0
 
-    cdef _dey(self, int _, int __):
+    cdef int _dey(self, int _, int __):
         """
         Decrement Y by 1
         :param addr:
@@ -834,7 +795,7 @@ cdef class MOS6502:
         self.push_stack(self.A)
         return 0
 
-    cdef _php(self, int _, int __):
+    cdef int _php(self, int _, int __):
         """
         Push status register onto stack
         :param _:
@@ -1307,8 +1268,7 @@ cdef class MOS6502:
 
     cdef int run_instr(self, unsigned char opcode, unsigned char data[2]):
         # *********** AUTOGENERATED BY meta.py - DO NOT EDIT DIRECTLY ***********
-        cdef int cycles=0
-        immediate = False
+        cdef int cycles=0, arg, immediate=False, m
         if opcode==0x69:
             cycles = 2
             arg = data[0]

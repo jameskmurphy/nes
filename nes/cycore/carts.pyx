@@ -118,6 +118,7 @@ cdef class NESCart2(NESCart0):
              prg_rom_writeable=False,   # whether or not the program memory is ROM or RAM
              ram_size_kb=8,
              nametable_mirror_pattern=[0, 0, 1, 1],
+             emulate_bus_conflicts=False   # whether or not to emulate bus conflicts on prg_bank select writes
              ):
         super().__init__(prg_rom_data=None,    # don't want to write prg_rom_data to the prg_rom because will be too big
                          chr_rom_data=chr_rom_data,
@@ -141,6 +142,8 @@ cdef class NESCart2(NESCart0):
             for i in range(16 * 1024):
                 self.banked_prg_rom[bnk][i] = prg_rom_data[bnk * 16 * 1024 + i]
 
+        self.emulate_bus_conflicts = emulate_bus_conflicts
+
     cdef unsigned char read(self, int address):
         if address < PRG_ROM_START:
             # RAM access
@@ -158,5 +161,15 @@ cdef class NESCart2(NESCart0):
             self.ram[address % self.ram_size] = value
         else:
             # any write to 0x8000 - 0xFFFF is treated as a write to the bank select register
-            # todo: there is something to do with bus conflicts that might matter - see https://wiki.nesdev.com/w/index.php/UxROM
+            if self.emulate_bus_conflicts:
+                # Bus conflicts occur because in some carts the ROM outputs the value in the ROM at the given address at the
+                # same time as the CPU is trying to write a value to this prg_bank register.  If they are not in agreement
+                # a bus conflict occurs and undefined behaviour can result.  A lot of programs get around this by writing to
+                # a location containing a value that agrees with the value being written (e.g. write 1 to 0x8000 when 0x8000
+                # contains 1, etc.).  It seems like in general 0 wins in bus conflicts, so they can be implemented by ANDing
+                # the value being written with the contents of the memory at the given address.
+                # see: https://wiki.nesdev.com/w/index.php/UxROM
+                #      https://wiki.nesdev.com/w/index.php/Bus_conflict
+                value &= self.read(address)
+
             self.prg_bank = value % self.num_prg_banks

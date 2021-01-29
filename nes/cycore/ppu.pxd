@@ -1,4 +1,5 @@
 from .memory cimport NESVRAM
+from .system cimport InterruptListener
 
 ### NES PPU Constants ##################################################################################################
 
@@ -20,9 +21,13 @@ cdef class NESPPU:
 
         unsigned char oam[OAM_SIZE_BYTES]
         unsigned char _oam[32]
-        list _sprite_pattern          # this might be inefficient
         unsigned char _sprite_bkg_priority[8]
-        list _active_sprites
+
+        #list _active_sprites
+        int _active_sprite_addrs[8]
+        int _sprite_line[8]
+        char _sprite_pattern[8][8]
+        int _num_active_sprites
 
         # track current screen position.  Screen drawing starts at pixel 1 (not 0) and runs to pixel 256.
         int line, pixel
@@ -35,7 +40,7 @@ cdef class NESPPU:
         int cycles_since_reset, frames_since_reset, time_at_new_frame
 
         NESVRAM vram
-        object interrupt_listener
+        InterruptListener interrupt_listener
 
         unsigned int screen_buffer[256][240]
 
@@ -48,10 +53,10 @@ cdef class NESPPU:
 
     ########### functions ##############################################
 
-    cpdef unsigned char read_register(self, int register)
-    cpdef void write_register(self, int register, unsigned char value)
-    cpdef int run_cycles(self, int num_cycles)
-    cpdef void write_oam(self, unsigned char* data)
+    cdef unsigned char read_register(self, int register)
+    cdef void write_register(self, int register, unsigned char value)
+    cdef int run_cycles(self, int num_cycles)
+    cdef void write_oam(self, unsigned char* data)
     cpdef copy_screen_buffer_to(self, unsigned int[:, :] dest)
 
     cdef void precalc_offsets(self)
@@ -62,9 +67,9 @@ cdef class NESPPU:
     cdef void _increment_vram_address(self)
     cdef void _trigger_nmi(self)
     cdef void _prefetch_active_sprites(self, int line)
-    cdef void _fill_sprite_latches(self, list active_sprite_addrs, list sprite_line, int double_sprites)
+    #cdef void _fill_sprite_latches(self, list active_sprite_addrs, list sprite_line, int double_sprites)
+    cdef void _fill_sprite_latches(self, int double_sprites)
     cdef int _overlay_sprites(self, int bkg_pixel)
-    cdef int _run_cycles(self, int num_cycles)
     cdef void fill_bkg_latches(self, int line, int col)
     cdef int _get_bkg_pixel(self)
     cdef void _new_frame(self)

@@ -2,8 +2,10 @@
 
 import pyximport; pyximport.install()
 
-from nes.cycore.memory import NESVRAM
-from nes.cycore.bitwise import bit_high, bit_low, set_bit, clear_bit, set_high_byte, set_low_byte
+from nes.cycore.memory cimport NESVRAM
+
+# important to cimport these rather than import them because that makes them have a lot less python interaction
+from nes.cycore.bitwise cimport bit_high, bit_low, set_bit, clear_bit, set_high_byte, set_low_byte
 
 from memory cimport PALETTE_START, NAMETABLE_START, NAMETABLE_LENGTH_BYTES, ATTRIBUTE_TABLE_OFFSET
 
@@ -128,9 +130,10 @@ cdef class NESPPU:
 
         # internal memory and latches used in sprite rendering
         #self._oam = bytearray(32)      # this is a secondary internal array of OAM used to store sprite that will be active on the next scanline
-        self._sprite_pattern = [[None] * 8 for _ in range(8)]
+        self._sprite_pattern = [[0] * 8 for _ in range(8)]
         self._sprite_bkg_priority = [0] * 8
-        self._active_sprites = []
+        #self._active_sprites = []
+        self._num_active_sprites = 0
 
         # some state used in rendering to tell us where on the screen we are drawing
         self.line = 0
@@ -194,7 +197,7 @@ cdef class NESPPU:
     def oam_addr(self):
         return self.oam_addr
 
-    cpdef void write_oam(self, unsigned char* data):
+    cdef void write_oam(self, unsigned char* data):
         cdef int i
         for i in range(OAM_SIZE_BYTES):
             self.oam[i] = data[i]
@@ -232,7 +235,7 @@ cdef class NESPPU:
                + SPRITE0_HIT_MASK * self.sprite_zero_hit \
                + SPRITE_OVERFLOW_MASK * self.sprite_overflow
 
-    cpdef unsigned char read_register(self, int register):
+    cdef unsigned char read_register(self, int register):
         """
         Read the specified PPU register (and take the correct actions along with that)
         This is mostly (always?) triggered by the CPU reading memory mapped ram at 0x2000-0x3FFF
@@ -291,7 +294,7 @@ cdef class NESPPU:
             self._io_latch = self._ppu_data_buffer
             return v
 
-    cpdef void write_register(self, int register, unsigned char value):
+    cdef void write_register(self, int register, unsigned char value):
         """
         Write one of the PPU registers with byte value and do whatever else that entails
         """
@@ -422,36 +425,49 @@ cdef class NESPPU:
         double_sprites = (self.ppu_ctrl & SPRITE_SIZE_MASK) > 0
         sprite_height = 16 if double_sprites else 8
 
-        self._active_sprites = []
-        sprite_line = []
+        #self._active_sprites = []
+        self._num_active_sprites = 0
+        #sprite_line = []
         for n in range(64):
-            addr = (self._oam_addr_held + n * 4) % OAM_SIZE_BYTES
+            addr = (self._oam_addr_held + n * 4) & 0xFF  # wrap around the address if need be
             sprite_y = self.oam[addr]
             if sprite_y <= line < sprite_y + sprite_height:
-                self._active_sprites.append(addr)
-                sprite_line.append(line - sprite_y)
-                if len(self._active_sprites) >= 9:
+                #self._active_sprites.append(addr)
+                if self._num_active_sprites < 8:
+                    self._active_sprite_addrs[self._num_active_sprites] = addr
+                    self._sprite_line[self._num_active_sprites] = line - sprite_y
+                    self._num_active_sprites += 1
+                    #sprite_line.append(line - sprite_y)
+                else:
+                    # overflow
+                    # todo: this implements the *correct* behaviour of sprite overflow, but not the buggy behaviour
+                    # (and even then it is not cycle correct, so could screw up games that rely on timing of this very exactly)
+                    self.sprite_overflow = True
                     break
-        if len(self._active_sprites) > 8:
-            # todo: this implements the *correct* behaviour of sprite overflow, but not the buggy behaviour
-            # (and even then it is not cycle correct, so could screw up games that rely on timing of this very exactly)
-            self.sprite_overflow = True
-            self._active_sprites = self._active_sprites[:8]
-            sprite_line = sprite_line[:8]
 
-        self._fill_sprite_latches(self._active_sprites, sprite_line, double_sprites)
+                #if len(self._active_sprites) >= 9:
+                #    break
+        #if len(self._active_sprites) > 8:
+        #    self._active_sprites = self._active_sprites[:8]
+        #    sprite_line = sprite_line[:8]
 
-    cdef void _fill_sprite_latches(self, list active_sprite_addrs, list sprite_line, int double_sprites):
+        self._fill_sprite_latches(double_sprites)
+
+    cdef void _fill_sprite_latches(self, int double_sprites):
         """
         Non cycle-correct way to pre-fetch the sprite lines for the next scanline
         """
         cdef int table_base, palette_ix, attribs, flip_v, flip_h, tile_ix, line, tile_base, x, c
         cdef int palette[4]
         cdef unsigned char sprite_pattern_lo, sprite_pattern_hi
+        cdef int i, address
 
         table_base = ((self.ppu_ctrl & SPRITE_PATTERN_TABLE_MASK) > 0) * 0x1000
 
-        for i, address in enumerate(active_sprite_addrs):
+        #for i, address in enumerate(active_sprite_addrs):
+        for i in range(self._num_active_sprites):
+            address = self._active_sprite_addrs[i]
+
             attribs = self.oam[(address + 2) & 0xFF]
             palette_ix = attribs & 0b00000011
 
@@ -462,9 +478,9 @@ cdef class NESPPU:
 
             if not double_sprites:
                 tile_ix = self.oam[(address + 1) & 0xFF]
-                line = sprite_line[i] if not flip_v else 7 - sprite_line[i]
+                line = self._sprite_line[i] if not flip_v else 7 - self._sprite_line[i]
             else:
-                line = sprite_line[i] if not flip_v else 15 - sprite_line[i]
+                line = self._sprite_line[i] if not flip_v else 15 - self._sprite_line[i]
                 tile_ix = self.oam[(address + 1) & 0xFF] & 0b11111110
                 if line >= 8:
                     # in the lower tile
@@ -495,9 +511,11 @@ cdef class NESPPU:
 
         sprite_c_out = self.transparent_color
         top_sprite = -1
-        for i in reversed(range(len(self._active_sprites))):
+        #for i in reversed(range(len(self._active_sprites))):
+        for i in reversed(range(self._num_active_sprites)):
             # render in reverse to make overwriting easier
-            sprite_addr = self._active_sprites[i]
+            #sprite_addr = self._active_sprites[i]
+            sprite_addr = self._active_sprite_addrs[i]
             sprite_x = self.oam[sprite_addr + 3]
             if sprite_x <= self.pixel - 1 < sprite_x + 8:
                 #print(self.line, i, sprite_x, sprite_addr, self._sprite_bkg_priority[i])
@@ -523,10 +541,7 @@ cdef class NESPPU:
 
         return c_out #if c_out != self.transparent_color else self.bkg_color  # background color
 
-    cpdef int run_cycles(self, int num_cycles):
-        return self._run_cycles(num_cycles)
-
-    cdef int _run_cycles(self, int num_cycles):
+    cdef int run_cycles(self, int num_cycles):
         # cycles correspond to screen pixels during the screen-drawing phase of the ppu
         # there are three ppu cycles per cpu cycles, at least on NTSC systems
         cdef int frame_ended, vblank_started, cyc
@@ -599,7 +614,7 @@ cdef class NESPPU:
                     # next line's sprite rendering, no sprites will be rendered on the first scanline, and this is why
                     # there is a 1 line offset on a sprite's Y coordinate."
                     # source: https://wiki.nesdev.com/w/index.php/PPU_sprite_evaluation  (note 1)
-                    self._active_sprites = []
+                    self._num_active_sprites = 0
                 elif 321 <= self.pixel <= 336:
                     # load data for next scanline
                     if self.pixel % 8 == 1:  # will happen at 321 and 329
@@ -633,7 +648,7 @@ cdef class NESPPU:
         Fill the ppu's rendering latches with the next tile to be rendered
         :return:
         """
-        cdef int i, row, tile_col, nx, total_row, total_col, ntbl_base, tile_addr, tile_index, tile_bank, table_base, tile_base, shift, palette_id, tile_line
+        cdef int i, row, tile_col, nx, total_row, total_col, ntbl_base, tile_addr, tile_index, tile_bank, table_base, tile_base, shift, palette_id, tile_line, line_plus_scroll_y
         cdef unsigned char attribute_byte, mask
 
         # shift the lower bits of the background latches ready to be refilled
@@ -679,8 +694,10 @@ cdef class NESPPU:
 
         tile_line = line_plus_scroll_y % 8
 
-        self._pattern_lo = set_low_byte(self._pattern_lo, self.vram.read(tile_base + tile_line))
-        self._pattern_hi = set_low_byte(self._pattern_hi, self.vram.read(tile_base + tile_line + 8))
+        self._pattern_lo = (self._pattern_lo & 0xFF00) + self.vram.read(tile_base + tile_line)
+        self._pattern_hi = (self._pattern_hi & 0xFF00) + self.vram.read(tile_base + tile_line + 8)
+        #self._pattern_lo = set_low_byte(self._pattern_lo, self.vram.read(tile_base + tile_line))
+        #self._pattern_hi = set_low_byte(self._pattern_hi, self.vram.read(tile_base + tile_line + 8))
 
     cdef int _get_bkg_pixel(self):
         cdef int fine_x, px, v, mask

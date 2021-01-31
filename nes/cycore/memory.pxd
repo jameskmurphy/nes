@@ -1,13 +1,14 @@
 from .ppu cimport NESPPU
 from .carts cimport NESCart
 from .system cimport InterruptListener
+from .apu cimport NESAPU
 
 
 ######## memory base ##################################################
 
 cdef class MemoryBase:
-    cpdef unsigned char read(self, int address)
-    cpdef void write(self, int address, unsigned char value)
+    cdef unsigned char read(self, int address)
+    cdef void write(self, int address, unsigned char value)
 
 
 ######## NES Main Memoroy #############################################
@@ -19,13 +20,14 @@ cdef class NESMappedRAM(MemoryBase):
     cdef unsigned char ram[RAM_SIZE]
     cdef unsigned char _last_bus
     cdef NESPPU ppu
+    cdef NESAPU apu
     cdef NESCart cart
     cdef InterruptListener interrupt_listener
-    cdef object apu, controller1, controller2
+    cdef object controller1, controller2
 
     ###### functions ##########################
-    cpdef unsigned char read(self, int address)
-    cpdef void write(self, int address, unsigned char value)
+    cdef unsigned char read(self, int address)
+    cdef void write(self, int address, unsigned char value)
 
     cdef void run_oam_dma(self, int page)
 
@@ -50,7 +52,7 @@ cdef class NESVRAM(MemoryBase):
     cdef int nametable_mirror_pattern[4]
 
     ###### functions ##########################
-    cpdef unsigned char read(self, int address)
-    cpdef void write(self, int address, unsigned char value)
+    cdef unsigned char read(self, int address)
+    cdef void write(self, int address, unsigned char value)
 
     cdef _set_nametable_mirror_pattern(self)

@@ -10,10 +10,10 @@ cdef class MemoryBase:
     def __init__(self):
         pass
 
-    cpdef unsigned char read(self, int address):
+    cdef unsigned char read(self, int address):
         raise NotImplementedError()
 
-    cpdef void write(self, int address, unsigned char value):
+    cdef void write(self, int address, unsigned char value):
         raise NotImplementedError()
 
 
@@ -24,7 +24,7 @@ DEF NUM_PPU_REGISTERS = 8       # number of ppu registers
 # NES Main memory map locations
 DEF RAM_END = 0x0800            # NES main ram to here
 DEF PPU_END = 0x4000            # PPU registers to here
-DEF APU_END = 0x4018            # APU registers (+OAM DMA reg) to here
+DEF APU_END = 0x4018            # APU registers (+OAM DMA reg and controllers) to here
 DEF APU_UNUSED_END = 0x4020     # generally unused APU and I/O functionality
 DEF OAM_DMA = 0x4014            # OAM DMA register address
 DEF CONTROLLER1 = 0x4016        # port for controller (read controller 1 / write both controllers)
@@ -54,7 +54,7 @@ cdef class NESMappedRAM(MemoryBase):
         # internal variable used for open bus behaviour
         self._last_bus = 0
 
-    cpdef unsigned char read(self, int address):
+    cdef unsigned char read(self, int address):
         """
         Read one byte of memory from the NES address space
         """
@@ -75,8 +75,8 @@ cdef class NESMappedRAM(MemoryBase):
                 # todo: deal with open bus behaviour of upper control lines
                 value = (self.controller2.read_bit() & 0b00011111) + (0x40 & 0b11100000)
             else:
-                # todo: APU registers
-                value = 0
+                # this is a read of the apu, pass it on directly
+                value = self.apu.read_register(address)
         elif address < APU_UNUSED_END:
             # todo: generally unused APU and I/O functionality
             value = 0
@@ -87,11 +87,12 @@ cdef class NESMappedRAM(MemoryBase):
         #logging.log(LOG_MEMORY, "read {:04X}  (= {:02X})  region={:10s}".format(address, value, region), extra={"source": "mem"})
         return value
 
-    cpdef void write(self, int address, unsigned char value):
+    cdef void write(self, int address, unsigned char value):
         """
         Write one byte of memory in the NES address space
         """
         #logging.log(LOG_MEMORY, "write {:02X} --> {:04X}".format(value, address), extra={"source": "mem"})
+        cdef int register_ix
 
         if address < RAM_END:    # RAM and its mirrors
             self.ram[address % RAM_SIZE] = value
@@ -105,8 +106,9 @@ cdef class NESMappedRAM(MemoryBase):
                 self.controller1.set_strobe(value)
                 self.controller2.set_strobe(value)
             else:
-                # todo: APU registers
-                pass
+                # this is a write of an apu register; pass it on to the apu
+                print("ppu cycles at write below:", self.ppu.cycles_since_reset)
+                self.apu.write_register(address, value)
         elif address < APU_UNUSED_END:
             # todo: generally unused APU and I/O functionality
             pass
@@ -140,14 +142,19 @@ cdef class NESMappedRAM(MemoryBase):
     def __getstate__(self):
         # annoyingly, Cython pickles char arrays as null terminated strings, so we have to do this manually
         ram = self.ram[:RAM_SIZE]
-        state = (ram, self._last_bus)
+        state = (ram, self._last_bus, self.apu, self.ppu, self.controller1, self.controller2, self.interrupt_listener)
         return state
 
     def __setstate__(self, state):
-        (ram, _last_bus) = state
+        (ram, _last_bus, apu, ppu, controller1, controller2, interrupt_listener) = state
         for i in range(RAM_SIZE):
             self.ram[i] = ram[i]
         self._last_bus = _last_bus
+        self.apu = apu
+        self.ppu = ppu
+        self.controller1 = controller1
+        self.controller2 = controller2
+        self.interrupt_listener = interrupt_listener
         return state
 
 
@@ -174,7 +181,7 @@ cdef class NESVRAM(MemoryBase):
         for i in range(4):
             self.nametable_mirror_pattern[i] = self.cart.nametable_mirror_pattern[i]
 
-    cpdef unsigned char read(self, int address):
+    cdef unsigned char read(self, int address):
         cdef unsigned char value
         cdef int page, offset, true_page
 
@@ -199,7 +206,7 @@ cdef class NESVRAM(MemoryBase):
             return self.palette_ram[address % PALETTE_SIZE_BYTES]
         return value
 
-    cpdef void write(self, int address, unsigned char value):
+    cdef void write(self, int address, unsigned char value):
         cdef int page, offset, true_page
 
         if address < NAMETABLE_START:

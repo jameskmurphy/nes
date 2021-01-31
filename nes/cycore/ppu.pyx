@@ -154,6 +154,7 @@ cdef class NESPPU:
         self.in_vblank = False
         self.sprite_zero_hit = False
         self.sprite_overflow = False
+        self.ignore_ppu_ctrl = True   # on startup, ignore writes to ppu_ctrl for about 30k cycles
 
         # status used by emulator
         self.cycles_since_reset = 0
@@ -249,11 +250,9 @@ cdef class NESPPU:
 
         if register == PPU_CTRL:
             # write only
-            #print("WARNING: reading i/o latch")
             return self._io_latch
         elif register == PPU_MASK:
             # write only
-            #print("WARNING: reading i/o latch")
             return self._io_latch
         elif register == PPU_STATUS:
             # clear ppu_scroll and ppu_addr latches
@@ -265,7 +264,6 @@ cdef class NESPPU:
             return v
         elif register == OAM_ADDR:
             # write only
-            #print("WARNING: reading i/o latch")
             return self._io_latch
         elif register == OAM_DATA:
             # todo: does not properly implement the weird results of this read during rendering
@@ -274,11 +272,9 @@ cdef class NESPPU:
             return v
         elif register == PPU_SCROLL:
             # write only
-            #print("WARNING: reading i/o latch")
             return self._io_latch
         elif register == PPU_ADDR:
             # write only
-            #print("WARNING: reading i/o latch")
             return self._io_latch
         elif register == PPU_DATA:
             if self.ppu_addr < PALETTE_START:
@@ -310,8 +306,13 @@ cdef class NESPPU:
             # write only
             # writes to ppu_ctrl are ignored at first
 
-            if self.cycles_since_reset < 29658:
-                return
+            # this is a slightly safer mechanism to implement this rather than relying on cycles_since_reset, which
+            # caused a bug by overflowing
+            if self.ignore_ppu_ctrl:
+                if self.cycles_since_reset < 29658:
+                    return
+                else:
+                    self.ignore_ppu_ctrl = False
             # can trigger an immediate NMI if we are in vblank and the (allow) vblank NMI trigger flag is flipped high
             trigger_nmi = self.in_vblank \
                           and (value & VBLANK_MASK) > 0 \
@@ -342,7 +343,6 @@ cdef class NESPPU:
             self.oam_addr = (self.oam_addr + 1) & 0xFF
         elif register == PPU_SCROLL:
             # write only
-            #print("scroll write: ", value, self.line, self.pixel)
             self.ppu_scroll[self._ppu_byte_latch] = value
             # flip which byte is pointed to on each write; reset on ppu status read.  Latch shared with ppu_addr.
             self._ppu_byte_latch = 1 - self._ppu_byte_latch
@@ -425,14 +425,11 @@ cdef class NESPPU:
         double_sprites = (self.ppu_ctrl & SPRITE_SIZE_MASK) > 0
         sprite_height = 16 if double_sprites else 8
 
-        #self._active_sprites = []
         self._num_active_sprites = 0
-        #sprite_line = []
         for n in range(64):
             addr = (self._oam_addr_held + n * 4) & 0xFF  # wrap around the address if need be
             sprite_y = self.oam[addr]
             if sprite_y <= line < sprite_y + sprite_height:
-                #self._active_sprites.append(addr)
                 if self._num_active_sprites < 8:
                     self._active_sprite_addrs[self._num_active_sprites] = addr
                     self._sprite_line[self._num_active_sprites] = line - sprite_y
@@ -444,13 +441,6 @@ cdef class NESPPU:
                     # (and even then it is not cycle correct, so could screw up games that rely on timing of this very exactly)
                     self.sprite_overflow = True
                     break
-
-                #if len(self._active_sprites) >= 9:
-                #    break
-        #if len(self._active_sprites) > 8:
-        #    self._active_sprites = self._active_sprites[:8]
-        #    sprite_line = sprite_line[:8]
-
         self._fill_sprite_latches(double_sprites)
 
     cdef void _fill_sprite_latches(self, int double_sprites):

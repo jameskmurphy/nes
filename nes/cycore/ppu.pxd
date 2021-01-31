@@ -35,9 +35,10 @@ cdef class NESPPU:
         # used in bkg latch precalc
         unsigned char nx0, ny0, _nx, _ny, _tile_row, _tile_col, _row_off, _col_off, _last_row
 
-        int in_vblank, sprite_zero_hit, sprite_overflow
+        bint in_vblank, sprite_zero_hit, sprite_overflow, ignore_ppu_ctrl
 
-        int cycles_since_reset, frames_since_reset, time_at_new_frame
+        int frames_since_reset, time_at_new_frame
+        long long cycles_since_reset
 
         NESVRAM vram
         InterruptListener interrupt_listener

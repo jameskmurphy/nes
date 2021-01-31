@@ -8,6 +8,7 @@ from nes.cycore.mos6502 import MOS6502
 from nes.cycore.memory import NESMappedRAM
 #from .pycore..ppu import NESPPU
 from nes.cycore.ppu import NESPPU
+from nes.cycore.apu import NESAPU
 from nes.rom import ROM
 from nes.peripherals import Screen, KeyboardController, ControllerBase
 from nes import LOG_CPU, LOG_PPU, LOG_MEMORY
@@ -16,6 +17,7 @@ import pickle
 import logging
 
 import pygame
+import pyaudio
 
 cdef class InterruptListener:
     def __init__(self):
@@ -28,6 +30,12 @@ cdef class InterruptListener:
 
     cdef void reset_nmi(self):
         self._nmi = False
+
+    cdef void raise_irq(self):
+        self._irq = True
+
+    cdef void reset_irq(self):
+        self._irq = False
 
     cdef void reset_oam_dma_pause(self):
         self.oam_dma_pause = False
@@ -49,7 +57,7 @@ cdef class NES:
     """
     The NES system itself, combining all of the parts, and the interlinks
     """
-    FRAMERATE_FPS = 480
+    FRAMERATE_FPS = 60
 
     def __init__(self, rom_file, screen_scale=3, log_file=None, log_level=None, prg_start=None):
         """
@@ -74,6 +82,7 @@ cdef class NES:
         # interrupts between the PPU and CPU in this emulator
         self.interrupt_listener = InterruptListener()
         self.ppu = NESPPU(cart=self.cart, interrupt_listener=self.interrupt_listener)
+        self.apu = NESAPU(interrupt_listener=self.interrupt_listener)
 
         # screen needs to have the PPU
         self.screen = Screen(ppu=self.ppu, scale=screen_scale)
@@ -81,7 +90,7 @@ cdef class NES:
 
         # due to memory mapping, lots of things are connected to the main memory
         self.memory = NESMappedRAM(ppu=self.ppu,
-                                   apu=None,
+                                   apu=self.apu,
                                    cart=self.cart,
                                    controller1=self.controller1,
                                    controller2=self.controller2,
@@ -136,7 +145,7 @@ cdef class NES:
         nes.screen._special_init()
         return nes
 
-    cdef int step(self):
+    cdef int step(self, int log_cpu):
         """
         The heartbeat of the system.  Run one instruction on the CPU and the corresponding amount of cycles on the
         PPU (three per CPU cycle, at least on NTSC systems).
@@ -147,25 +156,34 @@ cdef class NES:
             # do it this way for speed
             if self.interrupt_listener.nmi_active():
                 cpu_cycles = self.cpu.trigger_nmi()  # raises an NMI on the CPU, but this does take some CPU cycles
-                #print("CPU PC: {:X}".format(self.cpu.PC))
-
                 # should we do this here or leave this up to the triggerer?  It's really up to the triggerer to put the NMI
                 # line into its "off" position, but if the line remains in the same state the CPU will not trigger another
                 # NMI anyway.  Electronics lend themselves to edge-triggered events, whereas software is more naturally
                 # pulse triggered in some ways (a thing happens then returns).
                 self.interrupt_listener.reset_nmi()
+                if log_cpu:
+                    logging.log(logging.INFO, "NMI Triggered", extra={"source": "Interrupt"})
             elif self.interrupt_listener.irq_active():
-                raise NotImplementedError("IRQ is not implemented")
+                # note, cpu_cycles can be zero here if the cpu is set to ignore irq
+                cpu_cycles = self.cpu.trigger_irq()
+                self.interrupt_listener.reset_irq()
+                if log_cpu:
+                    logging.log(logging.INFO, "IRQ Triggered", extra={"source": "Interrupt"})
             elif self.interrupt_listener.oam_dma_pause:
                 # https://wiki.nesdev.com/w/index.php/PPU_OAM#DMA
                 cpu_cycles = self.cpu.oam_dma_pause()
                 self.interrupt_listener.reset_oam_dma_pause()
-        else:
+                if log_cpu:
+                    logging.log(logging.INFO, "OAM DMA", extra={"source": "Interrupt"})
+
+        if cpu_cycles == 0:
             cpu_cycles = self.cpu.run_next_instr()
 
-        #print(cpu_cycles, self.ppu.line, self.ppu.pixel)
+        if log_cpu:
+            logging.log(logging.INFO, self.cpu.log_line() + ", {}".format(self.ppu.cycles_since_reset) , extra={"source": "CPU"})
+
         vblank_started = self.ppu.run_cycles(cpu_cycles * PPU_CYCLES_PER_CPU_CYCLE)
-        #print(cpu_cycles, self.ppu.line, self.ppu.pixel)
+        self.apu.run_cycles(cpu_cycles)
         return vblank_started
 
     cpdef void run(self):
@@ -173,17 +191,34 @@ cdef class NES:
         Run the NES indefinitely (or until some quit signal); this will only exit on quit.
         There is some PyGame specific stuff in here in order to handle frame timing and checking for exits
         """
-        cdef int vblank_started, show_hud
+        cdef int vblank_started
+        cdef int show_hud, log_cpu
+
+
+        p = pyaudio.PyAudio()
 
         pygame.init()
         clock = pygame.time.Clock()
 
+        # this has to come after pygame init for some reason, or pygame won't start :(
+        player = p.open(format=pyaudio.paInt16,
+                channels=1,
+                rate=48000,
+                output=True,
+                frames_per_buffer=512,
+                stream_callback=self.apu.pyaudio_callback,
+                )
+
+
         show_hud = True
+        log_cpu = False
+
+        player.start_stream()
 
         while True:
             vblank_started=False
             while not vblank_started:
-                vblank_started = self.step()
+                vblank_started = self.step(log_cpu)
 
             # update the controllers once per frame
             self.controller1.update()
@@ -192,11 +227,16 @@ cdef class NES:
             fps = clock.get_fps()
             if show_hud:
                 self.screen.add_text("{:.0f} fps".format(clock.get_fps()), (10, 10), (0, 255, 0) if fps > 55 else (255, 0, 0))
+                if log_cpu:
+                    self.screen.add_text("logging cpu", (100, 10), (255, 128, 0))
 
             # Check for an exit
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     pygame.quit()
+                    player.stop_stream()
+                    player.close()
+                    p.terminate()
                     return
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_1:
@@ -204,6 +244,9 @@ cdef class NES:
                     if event.key == pygame.K_0:
                         self.save()
                         self.screen.add_text("saved", (100, 10), (255, 128, 0))
+                    if event.key == pygame.K_2:
+                        log_cpu = not log_cpu
+
 
             self.screen.show()
             clock.tick(self.FRAMERATE_FPS)

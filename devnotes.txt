@@ -10,9 +10,6 @@ Improvements and Corrections
               \-- think this is okay
   - (Error): sprites not rendering in first 8 pixels of screen (left) column
               \-- think this is okay
-  - Error:  Got a crash on SMB due to missing status bar (no s0 hit)
-              |-- cannot reliably reproduce, but has happened a few times - timing problem with scroll?
-              \-- got this after waiting for a long time (couple of games); related to below?
   - Error:  Some sort of strange corruption in Duck Tales
               |-- nametable / scroll got messed up, patterns (e.g. text) were also corrupted
               \-- happens after waiting a long time (about 400s, so time is at about 100) before starting
@@ -30,11 +27,6 @@ Improvements and Corrections
              |-- take input keypresses
              \-- output frame bitmap
 
-  - Major:  Performance
-             |-- Background latches!
-             |-- System -> Cython
-             |-- Check Cython / Python interaction (yellow lines)
-             \-- Could move more of run_instr -> meta
   - Major:  Code tidy up and comments
              |-- Tidy up pxd headers and constants
              |-- Localize class variables related to bkg latches if not needed
@@ -51,6 +43,9 @@ Improvements and Corrections
 
   - Minor:  Background palette hack
   - Minor:  OAMDATA read behaviour during render
+  - Minor:  Performance
+             |-- Background latches
+             \-- Could move more of run_instr -> meta
 
   - Unknown: "Vertical scroll bits reloaded" at cycles 280-304 of scanline 261 (see _new_frame())
              \-- I think this is from PPU scroll; v latch reloads bits from t latch at new frame, I think

@@ -41,7 +41,7 @@ cdef class MOS6502:
     cdef int PC, SP                 # program and stack pointers
     cdef int N, V, D, I, Z, C       # status bits
 
-    cdef int cycles_since_reset     # cycles since the processor was reset
+    cdef long long cycles_since_reset     # cycles since the processor was reset
     cdef int aax_sets_flags, undocumented_support_level, stack_underflow_causes_exception
 
     # instruction size data table

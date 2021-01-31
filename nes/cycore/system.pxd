@@ -1,4 +1,5 @@
 from .ppu cimport NESPPU
+from .apu cimport NESAPU
 from .carts cimport NESCart
 from .memory cimport NESMappedRAM
 from .mos6502 cimport MOS6502
@@ -9,6 +10,8 @@ cdef class InterruptListener:
 
     cdef void raise_nmi(self)
     cdef void reset_nmi(self)
+    cdef void raise_irq(self)
+    cdef void reset_irq(self)
     cdef void reset_oam_dma_pause(self)
     cdef void raise_oam_dma_pause(self)
     cdef int any_active(self)
@@ -24,6 +27,7 @@ cdef class NES:
 
     cdef:
         NESPPU ppu
+        NESAPU apu
         NESCart cart
         MOS6502 cpu
         NESMappedRAM memory
@@ -34,5 +38,5 @@ cdef class NES:
 
         int screen_scale
 
-    cdef int step(self)
+    cdef int step(self, int log_cpu)
     cpdef void run(self)

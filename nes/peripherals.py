@@ -33,20 +33,19 @@ class Screen:
         self.font = pygame.freetype.SysFont(pygame.font.get_default_font(), 24)
         self._text_buffer = []
 
-    def add_text(self, text, position, color):
-        self._text_buffer.append((text, position, color))
+    def add_text(self, text, position, color, ttl=1):
+        self._text_buffer.append((text, position, color, ttl))
 
     def _render_text(self, surf):
-        for (text, position, color) in self._text_buffer:
+        for (text, position, color, _) in self._text_buffer:
             self.font.render_to(surf, position, text, color)
 
     def show(self):
         self.ppu.copy_screen_buffer_to(self.buffer_sa)
-        #pygame.transform.scale(self.buffer.surface, (self.width * self.scale, self.height * self.scale), self.screen)
         pygame.transform.scale(self.buffer_surf, (self.width * self.scale, self.height * self.scale), self.screen)
         self._render_text(self.screen)
         pygame.display.flip()
-        self._text_buffer = []
+        self._text_buffer = [(txt, pos, col, ttl - 1) for (txt, pos, col, ttl) in self._text_buffer if ttl > 1]
 
     def clear(self, color=(0, 0, 0)):
         self.buffer_surf.fill(color)

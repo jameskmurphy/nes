@@ -6,27 +6,27 @@ Improvements and Corrections
   - Error:  Test failures:
               |-- BRK test failure
               \-- VBlank timing
-  - (Error): Cutting off sprites in top few pixels (SMB)
-              \-- think this is okay
-  - (Error): sprites not rendering in first 8 pixels of screen (left) column
-              \-- think this is okay
-  - Error:  Some sort of strange corruption in Duck Tales
-              |-- nametable / scroll got messed up, patterns (e.g. text) were also corrupted
-              \-- happens after waiting a long time (about 400s, so time is at about 100) before starting
 
-  - New: APU and audio!
-             |-- APU code
-             \-- playing sound (peripheral)
-  - New: Mappers
+  - Emulator: Save / load emulator state
+  - Emulator: Record keypresses
+  - Emulator: Replay keypresses
+  - Emulator: run frame by frame
+                |-- take input keypresses
+                \-- output frame bitmap
+
+  - Major: Switch to Pyglet?
+            \-- Does this work better?
+
+  - Major:  APU Improvements
+             |-- (Done: Envelopes - are these okay?)
+             |-- (Done: Sweep units - are these okay?)
+             |-- (Done: Noise - something wrong with it)
+             |-- (Maybe done: DMC - need to find a game that uses it to test)
+             |-- Interrupt flags in status register
+             \-- Error: something wrong with pulse sounds (too short?)
+  - Major: Mappers
              |-- MMC 1
              \-- MMC 3
-  - New: Save / load emulator state
-  - New: Record keypresses
-  - New: Replay keypresses
-  - New: run frame by frame
-             |-- take input keypresses
-             \-- output frame bitmap
-
   - Major:  Code tidy up and comments
              |-- Tidy up pxd headers and constants
              |-- Localize class variables related to bkg latches if not needed
@@ -35,12 +35,17 @@ Improvements and Corrections
              \-- initialize cython arrays
   - Major:  Test coverage
              |-- try more test ROMS
+             |-- make some tests (use cc65?) of our own
              \-- automation of testing
 
   - Medium:  Greyscale mode
   - Medium:  Colours boost if ppu_mask bits set
   - Medium:  Open bus behaviour on memory
+  - Medium:  check IRQ implementation works
+              \-- is used in a few places on the NES:  https://wiki.nesdev.com/w/index.php/IRQ
 
+  - Minor:  colliding and lost interrupts
+              \-- http://visual6502.org/wiki/index.php?title=6502_Timing_of_Interrupt_Handling
   - Minor:  Background palette hack
   - Minor:  OAMDATA read behaviour during render
   - Minor:  Performance

@@ -26,7 +26,7 @@ class Screen:
         # screens and buffers
         self.buffer_surf = pygame.Surface((self.width, self.height))
         self.buffer_sa = pygame.surfarray.pixels2d(self.buffer_surf)
-        self.screen = pygame.display.set_mode((self.width * self.scale, self.height * self.scale))
+        self.screen = pygame.display.set_mode((self.width * self.scale, self.height * self.scale), vsync=1)
 
         # font for writing to HUD
         pygame.freetype.init()

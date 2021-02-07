@@ -1,12 +1,13 @@
 from .system cimport InterruptListener
-
-
+from .memory cimport NESMappedRAM
 
 cdef enum:
-
     # sound synthesis constants
-    SAMPLE_RATE = 48000
+    SAMPLE_RATE = 48000     # 48kHz sample rate
+    SAMPLE_SCALE = 65535    # 16 bit samples
+    SAMPLE_OFFSET = 32768
     CPU_FREQ_HZ = 1789773   # https://wiki.nesdev.com/w/index.php/Cycle_reference_chart#Clock_rates
+    MAX_CPU_CYCLES_PER_LOOP = 24  # if the cpu has done more than this many cycles, complete them in loops
 
     # control registers
     STATUS = 0x4015
@@ -36,7 +37,105 @@ cdef enum:
     BIT_MODE = 7
     BIT_IRQ_INHIBIT = 6
 
+    # envelopes
+    NUM_ENVELOPES = 3
+    PULSE0 = 0  # } use 0 and 1 for the pulse to match with pulse_ix
+    PULSE1 = 1  # }
+    NOISE = 2
 
+    # buffer length of the APU's output buffer; must be a power of 2
+    APU_BUFFER_LENGTH = 65536
+    CHUNK_SIZE = 10000
+
+
+cdef class APUEnvelope:
+    cdef:
+        bint start_flag, loop_flag
+        unsigned int decay_level, divider, volume
+
+    cdef void update(self)
+    cdef void restart(self)
+
+
+cdef class APUSweep:
+    cdef:
+        bint enable, negate, reload
+        unsigned int period, shift, divider
+
+    cdef void update(self)
+
+
+cdef class APUUnit:
+    cdef:
+        bint enable, ctr_halt
+        int length_ctr
+        short output[SAMPLE_RATE]
+
+    cdef void update_length_ctr(self)
+    cdef void set_enable(self, bint value)
+
+
+cdef class APUTriangle(APUUnit):
+    cdef:
+        bint linear_reload_flag
+        int linear_reload_value, period, linear_ctr
+        double phase
+
+    cdef void quarter_frame(self)
+    cdef void half_frame(self)
+    cdef int generate_sample(self)
+
+
+cdef class APUPulse(APUUnit):
+    cdef:
+        bint constant_volume, is_unit_1
+        int period, duty
+        double phase
+        APUEnvelope env
+        bint sweep_enable, sweep_negate, sweep_reload
+        int sweep_period, sweep_shift, sweep_divider
+
+        int duty_waveform[4][8]  # duty cycle sequences
+
+    cdef void sweep_update(self)
+    cdef void quarter_frame(self)
+    cdef void half_frame(self)
+    cdef int generate_sample(self)
+
+
+cdef class APUNoise(APUUnit):
+    cdef:
+        bint constant_volume, mode
+        int period, feedback, timer
+        #double shift_ctr
+        APUEnvelope env
+
+        unsigned int timer_table[16]    # noise timer periods
+
+    cdef void update_cycles(self, int cycles)
+    cdef void quarter_frame(self)
+    cdef void half_frame(self)
+    cdef int generate_sample(self)
+
+
+cdef class APUDMC(APUUnit):
+    """
+    The DMC unit is pretty different to the other APU units
+    """
+    cdef:
+        NESMappedRAM memory
+        bint irq_enable, loop_flag, silence
+        unsigned int sample_address, sample_length, address, bytes_remaining
+        unsigned int rate, timer
+        int output_level, bits_remaining
+        unsigned char sample
+
+        unsigned int rate_table[16]    # sample consumption rates for the dmc
+
+    cdef void write_register(self, int address, unsigned char value)
+    cdef void update_cycles(self, int cycles)
+    cdef void read_advance(self)
+    cdef int generate_sample(self)
 
 
 cdef class NESAPU:
@@ -46,62 +145,35 @@ cdef class NESAPU:
         [2] https://wiki.nesdev.com/w/index.php/APU_Frame_Counter
     """
     cdef:
+        #### master volume
+        double master_volume
 
         #### apu state variables
         int cycles  # cycle within the current frame (counted in CPU cycles NOT APU cycles as specified in [2]
         int frame_segment  # which segment of the frame the apu is in
+        int _reset_timer_in  # after this number of cycles, reset the timer; ignored if < 0
+        double samples_per_cycle  # number of output samples to generate per output cycle (will be <1)
+        double samples_required  # number of samples currently required, once this gets over 1, generate a sample
+        unsigned long long _buffer_start, _buffer_end  # start and end index of the sample ring buffer
 
         #### system interrupt listener
         InterruptListener interrupt_listener
 
         #### buffers for up to 1s of data for each of the waveform generators
-        short triangle[SAMPLE_RATE]
-        short pulse[2][SAMPLE_RATE]
-        short output[SAMPLE_RATE]  # final output from the mixer
+        short output[APU_BUFFER_LENGTH]   # final output from the mixer; power of two sized to make ring buffer easier to implement
+        short buffer[CHUNK_SIZE]
 
         #### status register
-        bint enable_dmc, enable_noise, enable_triangle
-        bint enable_pulse[2]
         bint mode, irq_inhibit
 
-        #### pulse registers x2
-        int pulse_duty[2]
-        bint pulse_length_ctr_halt[2]
-        bint pulse_constant_volume[2]
-        int pulse_volume_envelope[2]
-        bint pulse_sweep_enable[2]
-        int pulse_sweep_period[2]
-        bint pulse_sweep_negate[2]
-        int pulse_sweep_shift[2]
-        int pulse_timer[2]
-        int pulse_length_ctr[2]
-
-        double pulse_phase[2]
-
-
-        #### triangle registers  0x4008-0x400B
-        bint tri_length_ctr_halt
-        int tri_linear_reload_value
-        bint tri_linear_reload_flag
-        int tri_timer, tri_linear_ctr, tri_length_ctr
-
-        double tri_phase
-
-        #### noise registers
-        bint noise_length_ctr_halt
-        bint noise_constant_volume
-        int noise_volume_envelope
-        bint noise_loop
-        int noise_period
-        int noise_length_ctr
-
-        #### DMC registers
-        int dmc_length_ctr
+        #### Sound units
+        APUTriangle triangle
+        APUPulse pulse1, pulse2
+        APUNoise noise
+        APUDMC dmc
 
         #### lookup tables
-        int length_table[32]   # timer length lookup
-        int duty[4][8]         # duty cycle sequences
-
+        unsigned int length_table[32]   # timer length lookup
 
         #### Frame counters
         int frame_counter
@@ -109,7 +181,7 @@ cdef class NESAPU:
     ##########################################################################
 
     # register control functions
-    cdef char read_register(self, int address)
+    cdef unsigned char read_register(self, int address)
     cdef void write_register(self, int address, unsigned char value)
 
     cdef void _set_status(self, unsigned char value)
@@ -118,20 +190,17 @@ cdef class NESAPU:
     cdef void _set_noise(self, int address, unsigned char value)
 
     # synchronous update functions
-    cdef void run_cycles(self, int cpu_cycles)
+    cdef int run_cycles(self, int cpu_cycles)
     cdef void quarter_frame_tick(self)
     cdef void half_frame_tick(self)
 
-    # triangle generation
-    cdef int _tri_by_phase(self, double phase_cyc)
-    cdef void generate_triangle(self, int samples)
-
-    # pulse generation
-    cdef int _pulse_by_phase(self, double phase_cyc, int duty_ix)
-    cdef void generate_pulse(self, int pulse_ix, int samples)
-
     # mixer
     cdef void mixer(self, int num_samples)
+    cdef int mix(self, int tri, int p1, int p2, int noise, int dmc)
 
     # output
+    cdef void generate_sample(self)
     cpdef short[:] get_sound(self, int samples)
+    cpdef void set_volume(self, float volume)
+
+    cpdef void wait_until_buffer_empty(self)

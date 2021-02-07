@@ -107,7 +107,7 @@ cdef class NESMappedRAM(MemoryBase):
                 self.controller2.set_strobe(value)
             else:
                 # this is a write of an apu register; pass it on to the apu
-                print("ppu cycles at write below:", self.ppu.cycles_since_reset)
+                #print("apu cycles at write below:", self.apu.cycles)
                 self.apu.write_register(address, value)
         elif address < APU_UNUSED_END:
             # todo: generally unused APU and I/O functionality

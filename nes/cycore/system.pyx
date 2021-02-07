@@ -19,6 +19,8 @@ import logging
 import pygame
 import pyaudio
 
+import time
+
 cdef class InterruptListener:
     def __init__(self):
         self._nmi = False
@@ -57,7 +59,7 @@ cdef class NES:
     """
     The NES system itself, combining all of the parts, and the interlinks
     """
-    FRAMERATE_FPS = 60
+    FRAMERATE_FPS = 100
 
     def __init__(self, rom_file, screen_scale=3, log_file=None, log_level=None, prg_start=None):
         """
@@ -96,6 +98,9 @@ cdef class NES:
                                    controller2=self.controller2,
                                    interrupt_listener=self.interrupt_listener
                                    )
+
+        # one nasty wrinkle here is that we have to give the apu's dmc channel access to the memory:
+        self.apu.dmc.memory = self.memory
 
         # only the memory is connected to the cpu, all access to other devices is done through memory mapping
         self.cpu = MOS6502(memory=self.memory,
@@ -151,6 +156,7 @@ cdef class NES:
         PPU (three per CPU cycle, at least on NTSC systems).
         """
         cdef int cpu_cycles=0
+        cdef bint vblank_started=False, quarter_frame=False
 
         if self.interrupt_listener.any_active():
             # do it this way for speed
@@ -183,8 +189,8 @@ cdef class NES:
             logging.log(logging.INFO, self.cpu.log_line() + ", {}".format(self.ppu.cycles_since_reset) , extra={"source": "CPU"})
 
         vblank_started = self.ppu.run_cycles(cpu_cycles * PPU_CYCLES_PER_CPU_CYCLE)
-        self.apu.run_cycles(cpu_cycles)
-        return vblank_started
+        quarter_frame = self.apu.run_cycles(cpu_cycles)
+        return quarter_frame + 2 * vblank_started
 
     cpdef void run(self):
         """
@@ -192,8 +198,10 @@ cdef class NES:
         There is some PyGame specific stuff in here in order to handle frame timing and checking for exits
         """
         cdef int vblank_started
-        cdef int show_hud, log_cpu
-
+        cdef float volume = 0.5
+        cdef double fps, t_start=0.
+        cdef bint show_hud, log_cpu, mute
+        cdef int frame=0, frame_start=0, cpu_cycles=0
 
         p = pyaudio.PyAudio()
 
@@ -202,33 +210,48 @@ cdef class NES:
 
         # this has to come after pygame init for some reason, or pygame won't start :(
         player = p.open(format=pyaudio.paInt16,
-                channels=1,
-                rate=48000,
-                output=True,
-                frames_per_buffer=512,
-                stream_callback=self.apu.pyaudio_callback,
-                )
-
+                        channels=1,
+                        rate=48000,
+                        output=True,
+                        frames_per_buffer=400,  # 400 is a half-frame at 60Hz, 48kHz sound
+                        stream_callback=self.apu.pyaudio_callback,
+                        )
 
         show_hud = True
         log_cpu = False
+        mute = False
 
         player.start_stream()
+
+        t_start = time.time()
 
         while True:
             vblank_started=False
             while not vblank_started:
-                vblank_started = self.step(log_cpu)
+                rval = self.step(log_cpu)
+                if rval % 2 == 1:
+                    # quarter frame
+                    #clock.tick(self.FRAMERATE_FPS * 4)
+                    pass
+                vblank_started = rval >= 2
 
             # update the controllers once per frame
             self.controller1.update()
             self.controller2.update()
 
-            fps = clock.get_fps()
+            fps = (frame - frame_start) * 1.0 / (time.time() - t_start)
+            #print(self.cpu.cycles_since_reset - cpu_cycles)
+            cpu_cycles = self.cpu.cycles_since_reset
+
+            if time.time() - t_start > 10.0:
+                frame_start = frame
+                t_start = time.time()
             if show_hud:
-                self.screen.add_text("{:.0f} fps".format(clock.get_fps()), (10, 10), (0, 255, 0) if fps > 55 else (255, 0, 0))
+                self.screen.add_text("{:.0f} fps".format(fps), (10, 10), (0, 255, 0) if fps > 55 else (255, 0, 0))
                 if log_cpu:
                     self.screen.add_text("logging cpu", (100, 10), (255, 128, 0))
+                if mute:
+                    self.screen.add_text("MUTE", (200 * self.screen_scale, 10), (0, 255, 0))
 
             # Check for an exit
             for event in pygame.event.get():
@@ -241,28 +264,35 @@ cdef class NES:
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_1:
                         show_hud = not show_hud
-                    if event.key == pygame.K_0:
+                    if event.key == pygame.K_3:
                         self.save()
                         self.screen.add_text("saved", (100, 10), (255, 128, 0))
+                    if event.key == pygame.K_0:
+                        if not mute:
+                            self.apu.set_volume(0)
+                            mute = True
+                        else:
+                            self.apu.set_volume(volume)
+                            mute=False
+                    if event.key == pygame.K_MINUS:
+                        volume = max(0, volume - 0.1)
+                        self.apu.set_volume(volume)
+                        self.screen.add_text("volume: " + "|" * int(10 * volume), (100 * self.screen_scale, 10), (0, 255, 0), ttl=30)
+                        mute=False
+                    if event.key == pygame.K_EQUALS:
+                        volume = min(1, volume + 0.1)
+                        self.apu.set_volume(volume)
+                        self.screen.add_text("volume: " + "|" * int(10 * volume), (100 * self.screen_scale, 10), (0, 255, 0), ttl=30)
+                        mute=False
                     if event.key == pygame.K_2:
                         log_cpu = not log_cpu
 
 
             self.screen.show()
-            clock.tick(self.FRAMERATE_FPS)
+            frame += 1
+            self.apu.wait_until_buffer_empty()  # sync on audio
+
+            #clock.tick(self.FRAMERATE_FPS)
             #print("frame end:  {:.1f} fps".format(clock.get_fps()))
-
-
-
-
-
-
-"""
-TODO:
-
-- IRQ is not implemented (and is used in a few places on the NES:  https://wiki.nesdev.com/w/index.php/IRQ)
-- colliding and lost interrupts:  http://visual6502.org/wiki/index.php?title=6502_Timing_of_Interrupt_Handling
-
-"""
 
 

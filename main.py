@@ -5,7 +5,7 @@ import logging
 from nes.cycore.system import NES
 from nes import LOG_CPU, LOG_PPU
 
-nes = NES("./roms/Super Mario Bros.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+nes = NES("./roms/Super Mario Bros. (Japan, USA).nes", log_file="./logs/nes.log", log_level=logging.INFO)
 #nes = NES("./roms/Balloon_fight.nes", log_file="./logs/nes.log", log_level=logging.INFO)
 #nes = NES("./roms/donkey kong.nes", log_file="./logs/nes.log", log_level=logging.INFO)
 #nes = NES("./roms/Ice Climber.nes", log_file="./logs/nes.log", log_level=logging.INFO)
@@ -53,6 +53,30 @@ nes = NES("./roms/Super Mario Bros.nes", log_file="./logs/nes.log", log_level=lo
 # ************ FAILED ***************
 # nes = NES("./tests/blargg_ppu_tests_2005.09.15b/vbl_clear_time.nes", log_file="./logs/nes.log", log_level=logging.INFO)
 #  \-- fails with vbl cleared too late, but not too worried as vbl period is showing up as 2274, which is about right
+
+
+# APU Tests
+# passed
+# nes = NES("./tests/blargg_apu_2005.07.30/02.len_table.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+
+
+# nes = NES("./tests/test_tri_lin_ctr/lin_ctr.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+
+
+# ************ FAILED ***************
+# nes = NES("./tests/blargg_apu_2005.07.30/01.len_ctr.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+# nes = NES("./tests/blargg_apu_2005.07.30/03.irq_flag.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+# nes = NES("./tests/blargg_apu_2005.07.30/04.clock_jitter.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+
+
+#nes = NES("./tests/square_timer_div2/square_timer_div2.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+
+#nes = NES("./tests/test_apu_timers/noise_pitch.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+
+
+# not sure
+# nes = NES("./tests/test_apu_timers/square_pitch.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+# nes = NES("./tests/test_apu_timers/triangle_pitch.nes", log_file="./logs/nes.log", log_level=logging.INFO)
 
 
 nes.run()

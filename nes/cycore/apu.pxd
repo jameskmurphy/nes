@@ -4,7 +4,7 @@ from .memory cimport NESMappedRAM
 cdef enum:
     # sound synthesis constants
     SAMPLE_RATE = 48000     # 48kHz sample rate
-    SAMPLE_SCALE = 65535    # 16 bit samples
+    SAMPLE_SCALE = 65536    # 16 bit samples
     SAMPLE_OFFSET = 32768
     CPU_FREQ_HZ = 1789773   # https://wiki.nesdev.com/w/index.php/Cycle_reference_chart#Clock_rates
     MAX_CPU_CYCLES_PER_LOOP = 24  # if the cpu has done more than this many cycles, complete them in loops
@@ -55,14 +55,6 @@ cdef class APUEnvelope:
 
     cdef void update(self)
     cdef void restart(self)
-
-
-cdef class APUSweep:
-    cdef:
-        bint enable, negate, reload
-        unsigned int period, shift, divider
-
-    cdef void update(self)
 
 
 cdef class APUUnit:
@@ -149,7 +141,7 @@ cdef class NESAPU:
         double master_volume
 
         #### apu state variables
-        int cycles  # cycle within the current frame (counted in CPU cycles NOT APU cycles as specified in [2]
+        int cycles,rate  # cycle within the current frame (counted in CPU cycles NOT APU cycles as specified in [2]
         int frame_segment  # which segment of the frame the apu is in
         int _reset_timer_in  # after this number of cycles, reset the timer; ignored if < 0
         double samples_per_cycle  # number of output samples to generate per output cycle (will be <1)
@@ -195,7 +187,6 @@ cdef class NESAPU:
     cdef void half_frame_tick(self)
 
     # mixer
-    cdef void mixer(self, int num_samples)
     cdef int mix(self, int tri, int p1, int p2, int noise, int dmc)
 
     # output
@@ -203,4 +194,8 @@ cdef class NESAPU:
     cpdef short[:] get_sound(self, int samples)
     cpdef void set_volume(self, float volume)
 
-    cpdef void wait_until_buffer_empty(self)
+    cpdef int buffer_remaining(self)
+
+    cpdef void set_rate(self, int rate)
+    cpdef int get_rate(self)
+

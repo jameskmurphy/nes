@@ -58,7 +58,8 @@ cdef class NESPPU:
     cdef void write_register(self, int register, unsigned char value)
     cdef int run_cycles(self, int num_cycles)
     cdef void write_oam(self, unsigned char* data)
-    cpdef copy_screen_buffer_to(self, unsigned int[:, :] dest)
+    cpdef void copy_screen_buffer_to(self, unsigned int[:, :] dest)
+    cpdef void get_screen_buffer(self, unsigned char[:] dest)
 
     cdef void precalc_offsets(self)
     cdef void invalidate_palette_cache(self)

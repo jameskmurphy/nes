@@ -63,31 +63,6 @@ cdef class APUEnvelope:
             self.restart()
 
 
-cdef class APUSweep:
-    """
-    APU frequency sweep unit used in pulse units
-    Reference:
-        [7] sweep: https://wiki.nesdev.com/w/index.php/APU_Sweep
-    """
-    def __init__(self):
-        self.enable = False
-        self.negate = False
-        self.reload = False
-        self.period = 0
-        self.shift = 0
-        self.divider = 0
-
-    cdef void update(self):
-        if self.divider == 0 or self.reload:
-            # If the divider's counter is zero or the reload flag is true, the counter is set to P and the reload flag
-            # is cleared. [7]
-            self.divider = self.period
-            self.reload = False
-        else:
-            # Otherwise, the counter is decremented. [7]
-            self.divider -= 1
-
-
 #### Sound generation units ############################################################################################
 
 cdef class APUTriangle(APUUnit):
@@ -289,7 +264,7 @@ cdef class APUNoise(APUUnit):
         cdef int xor_bit, feedback_bit
         self.timer += cycles
 
-        if self.timer >= 2 * self.period:    # todo: this should be 2, but sounds (more) right with 1 ?????
+        if self.timer >= 2 * self.period:
             self.timer -= 2 * self.period
             xor_bit = 6 if self.mode else 1
             feedback_bit = bit_high(self.feedback, 0) ^ bit_high(self.feedback, xor_bit)
@@ -444,10 +419,11 @@ cdef class NESAPU:
         self._reset_timer_in = -1
         self.samples_per_cycle = SAMPLE_RATE * 1. / CPU_FREQ_HZ
         self.samples_required = 0
+        self.rate=SAMPLE_RATE
 
         # sound output buffer
         self._buffer_start = 0
-        self._buffer_end = 800  # give it some bonus sound to start with
+        self._buffer_end = 2000  # give it some bonus sound to start with
 
         self.master_volume = master_volume
         self.mode = FOUR_STEP
@@ -465,7 +441,6 @@ cdef class NESAPU:
 
         for i in range(APU_BUFFER_LENGTH):
             self.output[i] = 0
-
 
     cpdef short[:] get_sound(self, int samples):
         """
@@ -494,12 +469,18 @@ cdef class NESAPU:
         self.output[self._buffer_end & (APU_BUFFER_LENGTH - 1)] = v
         self._buffer_end += 1
 
-    cpdef void wait_until_buffer_empty(self):
-        while self._buffer_end - self._buffer_start > 2400:
-            time.sleep(0.0001)
+    cpdef int buffer_remaining(self):
+        return self._buffer_end - self._buffer_start
 
     cpdef void set_volume(self, float volume):
         self.master_volume = volume
+
+    cpdef void set_rate(self, int rate):
+        self.rate = rate
+        self.samples_per_cycle = self.rate * 1. / CPU_FREQ_HZ
+
+    cpdef int get_rate(self):
+        return self.rate
 
     ######## interfacing with pyaudio #####################
 
@@ -537,7 +518,7 @@ cdef class NESAPU:
                     if self.mode == FIVE_STEP:
                         force_ticks = True
                     else: # four step mode
-                        # todo: is this right?  If mode is not set, do *not* generate frame ticks
+                        # If mode is FOUR_STEP, do *not* generate frame ticks
                         self.frame_segment = 0
 
             if self.cycles < 7457:
@@ -714,7 +695,7 @@ cdef class NESAPU:
         elif address == 0x400F:
             self.noise.length_ctr = self.length_table[value >> 3]
             # side effect: restart envelope and set the envelope start flag
-            # todo: what does restart envelope mean?
+            self.noise.env.restart()
             self.noise.env.start_flag = True
 
     cdef int mix(self, int triangle, int pulse1, int pulse2, int noise, int dmc):
@@ -727,18 +708,4 @@ cdef class NESAPU:
         sum_tnd = (triangle / 8227.) + (noise / 12241.) + (dmc / 22638.)
         pulse_out = 95.88 / ((8128. / sum_pulse) + 100.) if sum_pulse != 0 else 0
         tnd_out = 159.79 / (1. / sum_tnd + 100.) if sum_tnd != 0 else 0
-        return int((pulse_out + tnd_out) * self.master_volume * SAMPLE_SCALE - SAMPLE_OFFSET)
-
-    cdef void mixer(self, int num_samples):
-        """
-        Mix the channels into signed 16-bit audio samples
-        """
-        cdef int i
-        cdef double pulse_out, tnd_out, sum_pulse, sum_tnd
-
-        for i in range(num_samples):
-            sum_pulse = self.pulse1.output[i] + self.pulse2.output[i]
-            sum_tnd = (self.triangle.output[i] / 8227.) + (self.noise.output[i] / 12241.) + (self.dmc.output[i] / 22638.)
-            pulse_out = 95.88 / ((8128. / sum_pulse) + 100.) if sum_pulse != 0 else 0
-            tnd_out = 159.79 / (1. / sum_tnd + 100.) if sum_tnd != 0 else 0
-            self.output[i] = int((pulse_out + tnd_out) * self.master_volume * SAMPLE_SCALE - SAMPLE_OFFSET)
+        return int( (pulse_out + tnd_out) * self.master_volume * SAMPLE_SCALE)

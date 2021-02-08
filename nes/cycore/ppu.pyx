@@ -2,6 +2,9 @@
 
 import pyximport; pyximport.install()
 
+from cpython cimport array
+import array
+
 from nes.cycore.memory cimport NESVRAM
 
 # important to cimport these rather than import them because that makes them have a lot less python interaction
@@ -392,10 +395,19 @@ cdef class NESPPU:
             for y in range(SCREEN_HEIGHT_PX):
                 self.screen_buffer[x][y] = cc
 
-    cpdef copy_screen_buffer_to(self, unsigned int[:, :] dest):
+    cpdef void copy_screen_buffer_to(self, unsigned int[:, :] dest):
         # create a memory view to the screen to allow it to be treated as a buffer in the Numpy-esque style
-        cdef unsigned int[:, :] scr_mv = <unsigned int[:SCREEN_WIDTH_PX,:SCREEN_HEIGHT_PX]>self.screen_buffer
+        cdef unsigned int[:, :] scr_mv = <unsigned int[:SCREEN_WIDTH_PX, :SCREEN_HEIGHT_PX]>self.screen_buffer
         dest[:,:] = scr_mv[:,:]
+
+    cpdef void get_screen_buffer(self, unsigned char[:] dest):
+        cdef int y, x
+        cdef unsigned int[:, :] scr_mv = <unsigned int[:SCREEN_WIDTH_PX, :SCREEN_HEIGHT_PX]>self.screen_buffer
+        for y in range(240):
+            for x in range(256):
+                dest[(y * 256 + x) * 3] = (scr_mv[x, y] & 0x0F00) >> 16
+                dest[(y * 256 + x) * 3 + 1] = (scr_mv[x, y] & 0x00F0) >> 8
+                dest[(y * 256 + x) * 3 + 2] = (scr_mv[x, y] & 0x000F)
 
 
     cdef void _increment_vram_address(self):

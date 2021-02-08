@@ -21,6 +21,15 @@ cdef class InterruptListener:
 
 cdef enum:
     PPU_CYCLES_PER_CPU_CYCLE = 3
+    MIN_AUDIO_BUFFER_SAMPLES = 1200   # increase this if you get frequent audio glitches, decrease if sound is laggy
+    AUDIO_CHUNK_SAMPLES = 400  # how many audio samples go over in each chunk, a frame has 800 samples at 48kHz
+    TARGET_FPS = 60
+
+    # sync modes that are available, each with advantages and disadvantages
+    SYNC_NONE = 0      # no sync: runs very fast, unplayable, music is choppy
+    SYNC_AUDIO = 1     # sync to audio: rate is perfect, can glitch sometimes, screen tearing can be bad
+    SYNC_PYGAME = 2    # sync to pygame's clock, adaptive audio: generally reliable, some screen tearing
+    SYNC_VSYNC = 3     # sync to external vsync, adaptive audio: requires ~60Hz vsync, no tearing
 
 
 cdef class NES:
@@ -36,7 +45,7 @@ cdef class NES:
         object controller1, controller2
         object screen
 
-        int screen_scale
+        int screen_scale, sync_mode
 
     cdef int step(self, int log_cpu)
     cpdef void run(self)

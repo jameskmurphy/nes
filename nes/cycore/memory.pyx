@@ -211,7 +211,7 @@ cdef class NESVRAM(MemoryBase):
 
         if address < NAMETABLE_START:
             # pattern table - provided by the rom
-            self.cart.write_ppu(address, value)  # todo: need something better here via the read_ppu/wrtie_ppu in order to implement mappers
+            self.cart.write_ppu(address, value)
         elif address < PALETTE_START:
             # nametable
             page = int((address - NAMETABLE_START) / NAMETABLE_LENGTH_BYTES)  # which nametable?

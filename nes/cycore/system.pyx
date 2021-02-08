@@ -2,24 +2,24 @@
 
 import pyximport; pyximport.install()
 
-#from .pycore.mos6502 import MOS6502
 from nes.cycore.mos6502 import MOS6502
-#from .pycore.memory import NESMappedRAM
 from nes.cycore.memory import NESMappedRAM
-#from .pycore..ppu import NESPPU
 from nes.cycore.ppu import NESPPU
 from nes.cycore.apu import NESAPU
 from nes.rom import ROM
-from nes.peripherals import Screen, KeyboardController, ControllerBase
+from nes.peripherals import Screen, ScreenGL, KeyboardController, ControllerBase
 from nes import LOG_CPU, LOG_PPU, LOG_MEMORY
 import pickle
 
 import logging
 
 import pygame
-import pyaudio
+import pyaudio  # unfortunately, pygame's audio handling does not do what we need with gapless playback of short samples
 
 import time
+
+from .apu cimport SAMPLE_RATE
+
 
 cdef class InterruptListener:
     def __init__(self):
@@ -59,13 +59,25 @@ cdef class NES:
     """
     The NES system itself, combining all of the parts, and the interlinks
     """
-    FRAMERATE_FPS = 100
+    OSD_Y = 3
+    OSD_FPS_X = 5
+    OSD_VOL_X = 110
+    OSD_MUTE_X = 200
+    OSD_NOTE_X = 100
 
-    def __init__(self, rom_file, screen_scale=3, log_file=None, log_level=None, prg_start=None):
+    OSD_TEXT_COLOR = (0, 255, 0)
+    OSD_NOTE_COLOR = (255, 128, 0)
+    OSD_WARN_COLOR = (255, 0, 0)
+
+
+
+    def __init__(self, rom_file, screen_scale=3, log_file=None, log_level=None, prg_start=None, sync_mode=SYNC_VSYNC):
         """
         Build a NES and cartridge from the bits and pieces we have lying around plus some rom data!  Also do some things
         like set up logging, etc.
         """
+        self.sync_mode = sync_mode
+
         # set up the logger
         self.init_logging(log_file, log_level)
 
@@ -87,7 +99,7 @@ cdef class NES:
         self.apu = NESAPU(interrupt_listener=self.interrupt_listener)
 
         # screen needs to have the PPU
-        self.screen = Screen(ppu=self.ppu, scale=screen_scale)
+        self.screen = ScreenGL(ppu=self.ppu, scale=screen_scale, vsync=True if sync_mode == SYNC_VSYNC else False)
         self.screen_scale = screen_scale
 
         # due to memory mapping, lots of things are connected to the main memory
@@ -201,7 +213,7 @@ cdef class NES:
         cdef float volume = 0.5
         cdef double fps, t_start=0.
         cdef bint show_hud, log_cpu, mute
-        cdef int frame=0, frame_start=0, cpu_cycles=0
+        cdef int frame=0, frame_start=0, cpu_cycles=0, last_sound_buffer=0
 
         p = pyaudio.PyAudio()
 
@@ -211,9 +223,9 @@ cdef class NES:
         # this has to come after pygame init for some reason, or pygame won't start :(
         player = p.open(format=pyaudio.paInt16,
                         channels=1,
-                        rate=48000,
+                        rate=SAMPLE_RATE,
                         output=True,
-                        frames_per_buffer=400,  # 400 is a half-frame at 60Hz, 48kHz sound
+                        frames_per_buffer=AUDIO_CHUNK_SAMPLES,  # 400 is a half-frame at 60Hz, 48kHz sound
                         stream_callback=self.apu.pyaudio_callback,
                         )
 
@@ -247,11 +259,11 @@ cdef class NES:
                 frame_start = frame
                 t_start = time.time()
             if show_hud:
-                self.screen.add_text("{:.0f} fps".format(fps), (10, 10), (0, 255, 0) if fps > 55 else (255, 0, 0))
+                self.screen.add_text("{:.0f} fps, {}Hz".format(fps, self.apu.get_rate()), (self.OSD_FPS_X, self.OSD_Y), self.OSD_TEXT_COLOR if fps > TARGET_FPS-3 else self.OSD_WARN_COLOR)
                 if log_cpu:
-                    self.screen.add_text("logging cpu", (100, 10), (255, 128, 0))
+                    self.screen.add_text("logging cpu", (self.OSD_NOTE_X, self.OSD_Y), self.OSD_NOTE_COLOR)
                 if mute:
-                    self.screen.add_text("MUTE", (200 * self.screen_scale, 10), (0, 255, 0))
+                    self.screen.add_text("MUTE", (self.OSD_MUTE_X, self.OSD_Y), self.OSD_TEXT_COLOR)
 
             # Check for an exit
             for event in pygame.event.get():
@@ -266,7 +278,7 @@ cdef class NES:
                         show_hud = not show_hud
                     if event.key == pygame.K_3:
                         self.save()
-                        self.screen.add_text("saved", (100, 10), (255, 128, 0))
+                        self.screen.add_text("saved", (self.OSD_NOTE_X, self.OSD_Y), self.OSD_NOTE_COLOR)
                     if event.key == pygame.K_0:
                         if not mute:
                             self.apu.set_volume(0)
@@ -277,22 +289,51 @@ cdef class NES:
                     if event.key == pygame.K_MINUS:
                         volume = max(0, volume - 0.1)
                         self.apu.set_volume(volume)
-                        self.screen.add_text("volume: " + "|" * int(10 * volume), (100 * self.screen_scale, 10), (0, 255, 0), ttl=30)
+                        self.screen.add_text("volume: " + "|" * int(10 * volume), (self.OSD_VOL_X, self.OSD_Y), self.OSD_TEXT_COLOR, ttl=30)
                         mute=False
                     if event.key == pygame.K_EQUALS:
                         volume = min(1, volume + 0.1)
                         self.apu.set_volume(volume)
-                        self.screen.add_text("volume: " + "|" * int(10 * volume), (100 * self.screen_scale, 10), (0, 255, 0), ttl=30)
+                        self.screen.add_text("volume: " + "|" * int(10 * volume), (self.OSD_VOL_X, self.OSD_Y), self.OSD_TEXT_COLOR, ttl=30)
                         mute=False
                     if event.key == pygame.K_2:
                         log_cpu = not log_cpu
 
+            if self.sync_mode == SYNC_AUDIO:
+                # wait for the audio buffer to empty, but only if the audio is playing
+                while self.apu.buffer_remaining() > MIN_AUDIO_BUFFER_SAMPLES and player.is_active():
+                    clock.tick(500)  # wait for about 2ms (~= 96 samples)
+            elif self.sync_mode == SYNC_VSYNC or self.sync_mode == SYNC_PYGAME:
+                # here we rely on an external sync source, but allow the audio to adapt to it
+                if frame > 20:
+                    if self.apu.buffer_remaining() > last_sound_buffer:
+                        # if the rate is elevated and the sound buffer is growing, try reducing the rate
+                        if self.apu.get_rate() > SAMPLE_RATE:
+                            self.apu.set_rate(self.apu.get_rate() - 480)
+                    elif self.apu.buffer_remaining() < last_sound_buffer:
+                        self.apu.set_rate(self.apu.get_rate() + 480)
+
+                    last_sound_buffer = self.apu.buffer_remaining()
+            else:
+                # no sync at all, go as fast as we can!
+                pass
+
+            if self.sync_mode == SYNC_PYGAME:
+                # if we are using pygame sync, we have to supply our own clock tick here
+                clock.tick(TARGET_FPS)
+
+            if not player.is_active() and self.apu.buffer_remaining() > MIN_AUDIO_BUFFER_SAMPLES:
+                # try to (re)start the stream if it is not running if there is audio waiting
+                print("audio dropped, attempting restart")
+                player = p.open(format=pyaudio.paInt16,
+                                channels=1,
+                                rate=SAMPLE_RATE,
+                                output=True,
+                                frames_per_buffer=AUDIO_CHUNK_SAMPLES,  # 400 is a half-frame at 60Hz, 48kHz sound
+                                stream_callback=self.apu.pyaudio_callback,
+                                )
+                player.start_stream()
+
 
             self.screen.show()
             frame += 1
-            self.apu.wait_until_buffer_empty()  # sync on audio
-
-            #clock.tick(self.FRAMERATE_FPS)
-            #print("frame end:  {:.1f} fps".format(clock.get_fps()))
-
-

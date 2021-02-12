@@ -1,13 +1,7 @@
 # cython: profile=True, boundscheck=False, nonecheck=False
 
-from .memory cimport NESMappedRAM
-
-
-import logging
-
+from .system cimport OAM_DMA, DMC_DMA, DMC_DMA_DURING_OAM_DMA
 from nes.instructions import INSTRUCTION_SET, Instruction, AddressModes
-
-from nes import LOG_CPU
 
 cdef class MOS6502:
     """
@@ -106,9 +100,16 @@ cdef class MOS6502:
         # reset takes 7 cycles [9]
         self.cycles_since_reset = 7
 
-    cdef int oam_dma_pause(self):
+    cdef int dma_pause(self, int pause_type, int count):
         cdef int cycles
-        cycles = OAM_DMA_CPU_CYCLES + self.cycles_since_reset % 2
+        if pause_type == OAM_DMA:
+            cycles = OAM_DMA_CPU_CYCLES + self.cycles_since_reset % 2
+        elif pause_type == DMC_DMA:
+            #todo: there are some special cases detailed here: https://wiki.nesdev.com/w/index.php/APU_DMC
+            cycles = 4
+        elif pause_type == DMC_DMA_DURING_OAM_DMA:
+            #todo: there are some special cases detailed here: https://wiki.nesdev.com/w/index.php/APU_DMC
+            cycles = 2 * count
         self.cycles_since_reset += cycles
         return cycles
 
@@ -194,7 +195,7 @@ cdef class MOS6502:
             line += '${0:02X} (-> ${1:04X})'.format(self._from_2sc(data[0]), self.PC + 2 + self._from_2sc(data[0]))
         return line
 
-    def log_line(self):
+    def log_line(self, ppu_line="---", ppu_pixel="---"):
         """
         Generates a log line in the format of nestest
         """
@@ -214,11 +215,13 @@ cdef class MOS6502:
         while len(str) < 48:
             str += " "
 
-        str += "A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X} PPU:---,--- CYC:{:d}".format(self.A,
+        str += "A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X} PPU:{},{} CYC:{:d}".format(self.A,
                                                                                            self.X,
                                                                                            self.Y,
                                                                                            self._status_to_byte(b_flag=0),
                                                                                            self.SP,
+                                                                                           ppu_line,
+                                                                                           ppu_pixel,
                                                                                            self.cycles_since_reset
                                                                                            )
         return str

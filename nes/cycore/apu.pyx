@@ -1,6 +1,7 @@
 from .bitwise cimport bit_high
 import pyaudio
-import time
+
+from .system cimport DMC_DMA
 
 #### Basic components ##################################################################################################
 
@@ -289,16 +290,21 @@ cdef class APUDMC(APUUnit):
     directly from memory.  It operates in a different way to the other channels, so is not based on them.
     References:
         [9] DMC: https://wiki.nesdev.com/w/index.php/APU_DMC
+        [10] DMC interrupt flag reset: http://www.slack.net/~ant/nes-emu/apu_ref.txt
+        [11] interesting DMC model: http://www.slack.net/~ant/nes-emu/dmc/
     """
     RATE_TABLE = [428, 380, 340, 320, 286, 254, 226, 214, 190, 160, 142, 128, 106,  84,  72,  54]
 
-    def __init__(self):
+    def __init__(self, interrupt_listener):
         super().__init__()
+
+        self.interrupt_listener = interrupt_listener
 
         self.enable = False
         self.silence = True
         self.irq_enable = False
         self.loop_flag = False
+        self.interrupt_flag = False
 
         self.rate = 0
         self.output_level = 0
@@ -320,6 +326,8 @@ cdef class APUDMC(APUUnit):
         """
         if address == 0x4010:
             self.irq_enable = bit_high(value, 7)
+            if not self.irq_enable:
+                self.interrupt_flag = False
             self.loop_flag = bit_high(value, 6)
             self.rate = self.rate_table[value & 0b00001111]
         elif address == 0x4011:
@@ -367,24 +375,28 @@ cdef class APUDMC(APUUnit):
         """
         Reads a byte of memory and places it into the sample buffer; advances memory pointer, wrapping if necessary.
         """
-        if self.loop_flag and self.bytes_remaining == 0:
-            # if looping and have run out of data, go back to the start
-            self.bytes_remaining = self.sample_length
-            self.address = self.sample_address
+        if self.bytes_remaining == 0:
+            if self.loop_flag:
+                # if looping and have run out of data, go back to the start
+                self.bytes_remaining = self.sample_length
+                self.address = self.sample_address
+            else:
+                self.silence = True
 
         if self.bytes_remaining > 0:
             self.sample = self.memory.read(self.address)
             self.address = (self.address + 1) & 0xFFFF
             self.bytes_remaining -= 1
             self.silence = False
+            if self.bytes_remaining == 0 and self.irq_enable:
+                # this was the last byte that we just read
+                # "the IRQ is generated when the last byte of the sample is read, not when the last sample of the
+                # sample plays" [9]
+                self.interrupt_listener.raise_irq()
+                self.interrupt_flag = True
 
-            # todo: a DMC memory read should stall the CPU here for a variable number of cycles
-
-        elif not self.loop_flag:
-            self.silence = True
-            if self.irq_enable:
-                pass
-                #todo: raise IRQ
+            # a DMC memory read should stall the CPU here for a variable number of cycles
+            self.interrupt_listener.raise_dma_pause(DMC_DMA)
 
     cdef int generate_sample(self):
         """
@@ -403,6 +415,8 @@ cdef class NESAPU:
         [1] https://wiki.nesdev.com/w/index.php/APU#Registers
         [2] https://wiki.nesdev.com/w/index.php/APU_Frame_Counter
         [3] https://wiki.nesdev.com/w/index.php/APU_Length_Counter
+
+        [10] DMC interrupt flag reset: http://www.slack.net/~ant/nes-emu/apu_ref.txt
     """
 
     # length table is a lookup from the value written to the length counter and the value
@@ -421,6 +435,11 @@ cdef class NESAPU:
         self.samples_required = 0
         self.rate=SAMPLE_RATE
 
+        # the frame_interrupt_flag is connected to the CPU's IRQ line, so changes to this flag should be accompanied by
+        # a change to the interrupt_listener's state
+        self.frame_interrupt_flag = False
+
+
         # sound output buffer
         self._buffer_start = 0
         self._buffer_end = 2000  # give it some bonus sound to start with
@@ -433,7 +452,7 @@ cdef class NESAPU:
         self.pulse1 = APUPulse(is_unit_1=True)
         self.pulse2 = APUPulse(is_unit_1=False)
         self.noise = APUNoise()
-        self.dmc = APUDMC()
+        self.dmc = APUDMC(interrupt_listener)
 
         # copy the length table to a int array (avoid python interaction)
         for i in range(32):
@@ -485,8 +504,11 @@ cdef class NESAPU:
     ######## interfacing with pyaudio #####################
 
     def pyaudio_callback(self, in_data, frame_count, time_info, status):
-        data = self.get_sound(frame_count)
-        return (data, pyaudio.paContinue)
+        if self.buffer_remaining() > 0:
+            data = self.get_sound(frame_count)
+            return (data, pyaudio.paContinue)
+        else:
+            return (None, pyaudio.paAbort)
 
     ########################################################
 
@@ -535,6 +557,7 @@ cdef class NESAPU:
                     self.cycles -= 29830
                     if not self.irq_inhibit:
                         self.interrupt_listener.raise_irq()
+                        self.frame_interrupt_flag = True
                 else:  # five-step counter
                     if self.cycles <= 37281:
                         new_segment = 5
@@ -579,18 +602,24 @@ cdef class NESAPU:
         Read an APU register.  Actually the only one you can read is STATUS (0x4015).
         """
         cdef unsigned char value
-        cdef bint dmc_active = False, frame_interrupt = False, dmc_interrupt = False
+        cdef bint dmc_active = False
+
+        dmc_active = self.dmc.bytes_remaining > 0
 
         if address == STATUS:
-            value = (  (dmc_interrupt << 7)
-                     + (frame_interrupt << 6)
+            value = (  (self.dmc.interrupt_flag << 7)
+                     + (self.frame_interrupt_flag << 6)
                      + (dmc_active << 4)
                      + ((self.noise.length_ctr > 0) << 3)
                      + ((self.triangle.length_ctr > 0) << 2)
                      + ((self.pulse2.length_ctr > 0) << 1)
                      + (self.pulse1.length_ctr > 0)
                     )
-            # todo: side effect - this should clear frame interrupt flag
+            self.frame_interrupt_flag = False
+            # "When $4015 is written to, the channels' length counter enable flags are set,
+            # the DMC is possibly started or stopped, and the DMC's IRQ occurred flag is cleared." [10]
+            self.dmc.interrupt_flag = False
+            self.interrupt_listener.reset_irq()
             return value
 
         print("apu read: {:04X}".format(address))
@@ -604,6 +633,9 @@ cdef class NESAPU:
         elif address == FRAME_COUNTER:
             self.mode = bit_high(value, BIT_MODE)
             self.irq_inhibit = bit_high(value, BIT_IRQ_INHIBIT)
+            if self.irq_inhibit:
+                self.frame_interrupt_flag = False
+                self.interrupt_listener.reset_irq()
             # side effects:  reset timer (in 3-4 cpu cycles' time, if mode set generate quarter and half frame signals)
             self._reset_timer_in = 3 + self.cycles % 2
         elif 0x4000 <= address <= 0x4007:

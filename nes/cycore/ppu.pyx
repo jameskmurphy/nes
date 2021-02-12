@@ -2,13 +2,10 @@
 
 import pyximport; pyximport.install()
 
-from cpython cimport array
-import array
-
-from nes.cycore.memory cimport NESVRAM
+from .memory cimport NESVRAM
 
 # important to cimport these rather than import them because that makes them have a lot less python interaction
-from nes.cycore.bitwise cimport bit_high, bit_low, set_bit, clear_bit, set_high_byte, set_low_byte
+from .bitwise cimport bit_high, bit_low, set_bit, clear_bit, set_high_byte, set_low_byte
 
 from memory cimport PALETTE_START, NAMETABLE_START, NAMETABLE_LENGTH_BYTES, ATTRIBUTE_TABLE_OFFSET
 
@@ -120,6 +117,8 @@ cdef class NESPPU:
         self.ppu_scroll[:] = [0, 0]     # this contains x-scroll (byte 0) and y-scroll (byte 1) accumulated over two writes
         self.ppu_addr = 0               # the accumulated **16-bit** address
         self._ppu_byte_latch = 0        # latch to keep track of which byte is being written in ppu_scroll and ppu_addr; latch is shared
+
+        self._y_scroll_active = 0       # this is the actual y_scroll used for display; it is only updated once per frame, or on second write to ppu_addr
 
         # internal latches to deal with open bus and buffering behaviour
         self._ppu_data_buffer = 0       # data to hold buffered reads from VRAM (see read of ppu_data)
@@ -320,12 +319,11 @@ cdef class NESPPU:
             trigger_nmi = self.in_vblank \
                           and (value & VBLANK_MASK) > 0 \
                           and (self.ppu_ctrl & VBLANK_MASK) == 0
-            n_chng = (self.ppu_ctrl ^ value) & 0b00000011  # do the nametable bits change?
             self.ppu_ctrl = value
             # x and y coords of the nametable  (note, these can also get changed by writes to ppu_addr)
-            self.nx0 = bit_high(self.ppu_ctrl, 0)
-            self.ny0 = bit_high(self.ppu_ctrl, 1)
-            if n_chng:
+            if self.nx0 != bit_high(self.ppu_ctrl, 0) or self.ny0 != bit_high(self.ppu_ctrl, 1):
+                self.nx0 = bit_high(self.ppu_ctrl, 0)
+                self.ny0 = bit_high(self.ppu_ctrl, 1)
                 self.precalc_offsets()
             if trigger_nmi:
                 self._trigger_nmi()
@@ -370,11 +368,27 @@ cdef class NESPPU:
                 # here we just directly change the values of the scroll registers since they are write only and are used
                 # only for this (rather than accumulating in a different internal latch _t like shown in [7]).  I think
                 # that this is okay.
+
+                #print("{:08b} {:08b} {:08b}".format(self.ppu_scroll[PPU_SCROLL_Y], value, ((value & 0b11100000) >> 2), (self.ppu_scroll[PPU_SCROLL_Y] & 0b11000111) + ((value & 0b11100000) >> 2)))
+
                 self.ppu_scroll[PPU_SCROLL_X] = (self.ppu_scroll[PPU_SCROLL_X] & 0b00000111) + ((value & 0b00011111) << 3)
                 self.ppu_scroll[PPU_SCROLL_Y] = (self.ppu_scroll[PPU_SCROLL_Y] & 0b11000111) + ((value & 0b11100000) >> 2)
+
+                # side effect is that y-scroll is changed immediately, allowing mid-frame y-scroll changes
+                self._y_scroll_active = self.ppu_scroll[PPU_SCROLL_Y]
+
+                # if this is mid-frame, account properly for the current line:
+                if self.line <= 239:
+                    #print("mid frame y scroll: {}".format(self._y_scroll_active))
+                    self._y_scroll_active -= self.line & 0b11111000
+                    #print("adjusted to: {}".format(self._y_scroll_active))
+
+
+                self.precalc_offsets()
+
+            #print("{}, {}:  sx={}, sy={}".format(self.line, self.pixel, self.ppu_scroll[PPU_SCROLL_X], self.ppu_scroll[PPU_SCROLL_Y]))
             # flip which byte is pointed to on each write; reset on ppu status read
             self._ppu_byte_latch = 1 - self._ppu_byte_latch
-            self.precalc_offsets()
         elif register == PPU_DATA:
             # read/write
             self.vram.write(self.ppu_addr, value)
@@ -408,7 +422,6 @@ cdef class NESPPU:
                 dest[(y * 256 + x) * 3] = (scr_mv[x, y] & 0x0F00) >> 16
                 dest[(y * 256 + x) * 3 + 1] = (scr_mv[x, y] & 0x00F0) >> 8
                 dest[(y * 256 + x) * 3 + 2] = (scr_mv[x, y] & 0x000F)
-
 
     cdef void _increment_vram_address(self):
         """
@@ -642,7 +655,7 @@ cdef class NESPPU:
 
     cdef void precalc_offsets(self):
         cdef total_row, total_col
-        self._row_off = self.ny0 * SCREEN_TILE_ROWS + ((self.ppu_scroll[PPU_SCROLL_Y] & 0b11111000) >> 3)
+        self._row_off = self.ny0 * SCREEN_TILE_ROWS + (self._y_scroll_active / 8)   # todo
         self._col_off = self.nx0 * SCREEN_TILE_COLS + ((self.ppu_scroll[PPU_SCROLL_X] & 0b11111000) >> 3)
 
     cdef void fill_bkg_latches(self, int line, int col):
@@ -657,11 +670,11 @@ cdef class NESPPU:
         self._pattern_hi <<= 8
         self._pattern_lo <<= 8
 
-        line_plus_scroll_y = line + (self.ppu_scroll[PPU_SCROLL_Y] & 0b00000111)
+        line_plus_scroll_y = line + (self._y_scroll_active & 0b00000111)
 
         # get the tile from the nametable
         row = line_plus_scroll_y / 8
-        if row != self._last_row:
+        if True: #row != self._last_row:
             # this will often be repeated in sequence, so can cache them
             total_row = row + self._row_off
             self._ny = (total_row / SCREEN_TILE_ROWS) & 1
@@ -736,8 +749,10 @@ cdef class NESPPU:
         self.pixel = 0
         self.line = 0
 
-        #logging.log(logging.INFO, "PPU frame {} starting".format(self.frames_since_reset), extra={"source": "PPU"})
-        # todo: "Vertical scroll bits are reloaded if rendering is enabled" - don't know what this means
+        # "Vertical scroll bits are reloaded if rendering is enabled"
+        self._y_scroll_active = self.ppu_scroll[PPU_SCROLL_Y]
+        self.precalc_offsets()
+
 
     cdef void decode_palette(self, int* palette_out, int palette_id, int is_sprite=False):
         """

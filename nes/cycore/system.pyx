@@ -25,7 +25,8 @@ cdef class InterruptListener:
     def __init__(self):
         self._nmi = False
         self._irq = False   # the actual IRQ line on the 6502 rests high and is low-triggered
-        self.oam_dma_pause = False
+        self.dma_pause = False
+        self.dma_pause_count = 0
 
     cdef void raise_nmi(self):
         self._nmi = True
@@ -39,14 +40,16 @@ cdef class InterruptListener:
     cdef void reset_irq(self):
         self._irq = False
 
-    cdef void reset_oam_dma_pause(self):
-        self.oam_dma_pause = False
+    cdef void reset_dma_pause(self):
+        self.dma_pause = 0
+        self.dma_pause_count = 0
 
-    cdef void raise_oam_dma_pause(self):
-        self.oam_dma_pause = True
+    cdef void raise_dma_pause(self, int type):
+        self.dma_pause = type
+        self.dma_pause_count += 1  # can (and this will be rare) get multiple DMC DMA pauses during OAM DMA
 
     cdef int any_active(self):
-        return self._nmi or self._irq or self.oam_dma_pause
+        return self._nmi or self._irq or self.dma_pause
 
     cdef int nmi_active(self):
         return self._nmi
@@ -71,7 +74,7 @@ cdef class NES:
 
 
 
-    def __init__(self, rom_file, screen_scale=3, log_file=None, log_level=None, prg_start=None, sync_mode=SYNC_VSYNC):
+    def __init__(self, rom_file, screen_scale=3, log_file=None, log_level=None, prg_start=None, sync_mode=SYNC_AUDIO):
         """
         Build a NES and cartridge from the bits and pieces we have lying around plus some rom data!  Also do some things
         like set up logging, etc.
@@ -168,7 +171,7 @@ cdef class NES:
         PPU (three per CPU cycle, at least on NTSC systems).
         """
         cdef int cpu_cycles=0
-        cdef bint vblank_started=False, quarter_frame=False
+        cdef bint vblank_started=False
 
         if self.interrupt_listener.any_active():
             # do it this way for speed
@@ -187,10 +190,13 @@ cdef class NES:
                 self.interrupt_listener.reset_irq()
                 if log_cpu:
                     logging.log(logging.INFO, "IRQ Triggered", extra={"source": "Interrupt"})
-            elif self.interrupt_listener.oam_dma_pause:
+            elif self.interrupt_listener.dma_pause:
                 # https://wiki.nesdev.com/w/index.php/PPU_OAM#DMA
-                cpu_cycles = self.cpu.oam_dma_pause()
-                self.interrupt_listener.reset_oam_dma_pause()
+                cpu_cycles = self.cpu.dma_pause(self.interrupt_listener.dma_pause,
+                                                self.interrupt_listener.dma_pause_count
+                                                )
+                self.interrupt_listener.reset_dma_pause()
+                had_dma_pause = True
                 if log_cpu:
                     logging.log(logging.INFO, "OAM DMA", extra={"source": "Interrupt"})
 
@@ -198,11 +204,14 @@ cdef class NES:
             cpu_cycles = self.cpu.run_next_instr()
 
         if log_cpu:
-            logging.log(logging.INFO, self.cpu.log_line() + ", {}".format(self.ppu.cycles_since_reset) , extra={"source": "CPU"})
+            logging.log(logging.INFO, self.cpu.log_line(self.ppu.line, self.ppu.pixel) , extra={"source": "CPU"})
 
         vblank_started = self.ppu.run_cycles(cpu_cycles * PPU_CYCLES_PER_CPU_CYCLE)
-        quarter_frame = self.apu.run_cycles(cpu_cycles)
-        return quarter_frame + 2 * vblank_started
+        self.apu.run_cycles(cpu_cycles)
+        if had_dma_pause and self.interrupt_listener.dma_pause:
+            # any apu dmc dma pause that occurred during an oam dma pause should average 2 rather than 4 cycles
+            self.interrupt_listener.dma_pause = DMC_DMA_DURING_OAM_DMA
+        return vblank_started
 
     cpdef void run(self):
         """
@@ -240,12 +249,7 @@ cdef class NES:
         while True:
             vblank_started=False
             while not vblank_started:
-                rval = self.step(log_cpu)
-                if rval % 2 == 1:
-                    # quarter frame
-                    #clock.tick(self.FRAMERATE_FPS * 4)
-                    pass
-                vblank_started = rval >= 2
+                vblank_started = self.step(log_cpu)
 
             # update the controllers once per frame
             self.controller1.update()
@@ -334,6 +338,26 @@ cdef class NES:
                                 )
                 player.start_stream()
 
+            #0self.debug_draw_nametables()
 
             self.screen.show()
             frame += 1
+
+    cdef void debug_draw_nametables(self):
+        cdef int nx, ny, x, y
+        line = ""
+
+        for ny in range(2):
+            for y in range(30):
+                line = ""
+                for nx in range(2):
+                    base = 0x2000 + 0x800 * ny + 0x400 * nx
+                    for x in range(32):
+                        tile = self.ppu.vram.read(base + 32 * y + x)
+                        line += "{:2X} ".format(tile)
+                    line += "     "
+                print(line)
+            print()
+        print()
+
+

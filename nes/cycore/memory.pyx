@@ -1,7 +1,6 @@
 # cython: profile=True, boundscheck=False, nonecheck=False
 
-import logging
-from nes import LOG_MEMORY
+from .system cimport OAM_DMA
 
 cdef class MemoryBase:
     """
@@ -22,7 +21,7 @@ cdef class MemoryBase:
 DEF NUM_PPU_REGISTERS = 8       # number of ppu registers
 
 # NES Main memory map locations
-DEF RAM_END = 0x0800            # NES main ram to here
+DEF RAM_END = 0x2000            # NES main ram to here  (2kb mirrored 4x)
 DEF PPU_END = 0x4000            # PPU registers to here
 DEF APU_END = 0x4018            # APU registers (+OAM DMA reg and controllers) to here
 DEF APU_UNUSED_END = 0x4020     # generally unused APU and I/O functionality
@@ -98,6 +97,8 @@ cdef class NESMappedRAM(MemoryBase):
             self.ram[address % RAM_SIZE] = value
         elif address < PPU_END:  # PPU registers
             register_ix = address % NUM_PPU_REGISTERS
+            #if register_ix==5:
+            #    print("mem: {} -> ppu 5  ({:04X})".format(value, address))
             self.ppu.write_register(register_ix, value)
         elif address < APU_END:
             if address == OAM_DMA:
@@ -137,7 +138,7 @@ cdef class NESMappedRAM(MemoryBase):
         # pass with the size here to avoid zero-terminating as if it were a string
         self.ppu.write_oam(data_block[:OAM_SIZE_BYTES])
         # tell the interrupt listener that the CPU should pause due to OAM DMA
-        self.interrupt_listener.raise_oam_dma_pause()
+        self.interrupt_listener.raise_dma_pause(OAM_DMA)
 
     def __getstate__(self):
         # annoyingly, Cython pickles char arrays as null terminated strings, so we have to do this manually

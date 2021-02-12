@@ -50,7 +50,7 @@ cdef class MOS6502:
 
     cdef void make_instruction_data_tables(self)
     cdef int run_instr(self, unsigned char opcode, unsigned char data[2])
-    cdef int oam_dma_pause(self)
+    cdef int dma_pause(self, int pause_type, int count)
     cdef int _from_le(self, unsigned char* data)
     cdef int _read_word(self, int addr, int wrap_at_page)
     cdef int trigger_nmi(self)

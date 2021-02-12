@@ -14,6 +14,7 @@ cdef class NESPPU:
     cdef:
         unsigned char ppu_ctrl, ppu_mask, oam_addr, oam_data, _ppu_data_buffer, _io_latch
         unsigned char ppu_scroll[2]
+        int _y_scroll_active
         unsigned int _oam_addr_held, ppu_addr, _ppu_byte_latch
 
         int _palette[2][4]

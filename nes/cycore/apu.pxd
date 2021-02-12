@@ -116,7 +116,9 @@ cdef class APUDMC(APUUnit):
     """
     cdef:
         NESMappedRAM memory
-        bint irq_enable, loop_flag, silence
+        InterruptListener interrupt_listener
+
+        bint irq_enable, loop_flag, silence, interrupt_flag
         unsigned int sample_address, sample_length, address, bytes_remaining
         unsigned int rate, timer
         int output_level, bits_remaining
@@ -156,7 +158,7 @@ cdef class NESAPU:
         short buffer[CHUNK_SIZE]
 
         #### status register
-        bint mode, irq_inhibit
+        bint mode, irq_inhibit, frame_interrupt_flag
 
         #### Sound units
         APUTriangle triangle

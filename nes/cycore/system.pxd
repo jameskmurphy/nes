@@ -27,7 +27,7 @@ cdef class InterruptListener:
 
 cdef enum:
     PPU_CYCLES_PER_CPU_CYCLE = 3
-    MIN_AUDIO_BUFFER_SAMPLES = 1200   # increase this if you get frequent audio glitches, decrease if sound is laggy
+    MIN_AUDIO_BUFFER_SAMPLES = 1800   # increase this if you get frequent audio glitches, decrease if sound is laggy
     AUDIO_CHUNK_SAMPLES = 400         # how many audio samples go over in each chunk, a frame has 800 samples at 48kHz
     TARGET_FPS = 60                   # system's target framerate (NTSC)
 

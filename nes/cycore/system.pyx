@@ -74,7 +74,7 @@ cdef class NES:
 
 
 
-    def __init__(self, rom_file, screen_scale=3, log_file=None, log_level=None, prg_start=None, sync_mode=SYNC_AUDIO):
+    def __init__(self, rom_file, screen_scale=3, log_file=None, log_level=None, prg_start=None, sync_mode=SYNC_PYGAME):
         """
         Build a NES and cartridge from the bits and pieces we have lying around plus some rom data!  Also do some things
         like set up logging, etc.
@@ -221,7 +221,7 @@ cdef class NES:
         cdef int vblank_started
         cdef float volume = 0.5
         cdef double fps, t_start=0.
-        cdef bint show_hud, log_cpu, mute
+        cdef bint show_hud, log_cpu, mute, audio_drop=0
         cdef int frame=0, frame_start=0, cpu_cycles=0, last_sound_buffer=0
 
         p = pyaudio.PyAudio()
@@ -310,11 +310,11 @@ cdef class NES:
             elif self.sync_mode == SYNC_VSYNC or self.sync_mode == SYNC_PYGAME:
                 # here we rely on an external sync source, but allow the audio to adapt to it
                 if frame > 20:
-                    if self.apu.buffer_remaining() > last_sound_buffer:
+                    if self.apu.buffer_remaining() > last_sound_buffer and not audio_drop:
                         # if the rate is elevated and the sound buffer is growing, try reducing the rate
                         if self.apu.get_rate() > SAMPLE_RATE:
-                            self.apu.set_rate(self.apu.get_rate() - 480)
-                    elif self.apu.buffer_remaining() < last_sound_buffer:
+                            self.apu.set_rate(self.apu.get_rate() - 48)
+                    elif self.apu.buffer_remaining() < last_sound_buffer or audio_drop:
                         self.apu.set_rate(self.apu.get_rate() + 480)
 
                     last_sound_buffer = self.apu.buffer_remaining()
@@ -326,9 +326,13 @@ cdef class NES:
                 # if we are using pygame sync, we have to supply our own clock tick here
                 clock.tick(TARGET_FPS)
 
+
             if not player.is_active() and self.apu.buffer_remaining() > MIN_AUDIO_BUFFER_SAMPLES:
                 # try to (re)start the stream if it is not running if there is audio waiting
-                print("audio dropped, attempting restart")
+                #print("audio dropped, attempting restart")
+                audio_drop=True
+                player.stop_stream()
+                player.close()
                 player = p.open(format=pyaudio.paInt16,
                                 channels=1,
                                 rate=SAMPLE_RATE,
@@ -337,6 +341,8 @@ cdef class NES:
                                 stream_callback=self.apu.pyaudio_callback,
                                 )
                 player.start_stream()
+            else:
+                audio_drop = False
 
             #0self.debug_draw_nametables()
 

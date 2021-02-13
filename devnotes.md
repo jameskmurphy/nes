@@ -8,15 +8,6 @@ Improvements and Corrections
 
 ### Errors
 
-* Duck Tales scrolls the wrong way on vertical scroll!
-  * Okay, this is due to complex reasons in the handling of y-scroll in the ppu.  The y-scroll is updated
-              from the scroll register writes at some point in the frame, but if instead writes to ppuaddr are used
-              the update happens IMMEDIATELY on the second write, allowing y-scroll to be updated mid-frame.
-              So, we need to change the implementation to deal with this properly
-  * ~~We've got it better, but we now have this off-by-6 bug described here, due to the scroll not updating
-              during render:  https://emudev.de/nes-emulator/unrom-mapper-duck-tales-and-scrolling-again/~~
-  * Fixed the off-by-6 as described
-  * Mostly good, but lumpy at the start and possibly showing a bug described here: https://www.gridbugs.org/zelda-screen-transitions-are-undefined-behaviour/
 * Duck Tales has some sort of problem that causes status bar to disappear when character gets on it
   * This actually might be correct behaviour - verify
   * There is a slight timing problem leading to status bar ending in the mid-cycle
@@ -55,17 +46,13 @@ Improvements and Corrections
 * Still some sync problems sometimes
   * OpenGL adaptive audio sync is sometimes problematic
   * Syncing in all modes seems to be problematic with external monitor plugged in (MBP / 1x4k external on Thunderbolt )
-* PPU refactor
-  * change to use updating v register during render (violates single source of truth for line, though)
 * APU Tests
   * Test DMC
   * Test IRQ
 * Code tidy up and comments
-  * Tidy up pxd headers and constants
-  * Localize class variables related to bkg latches if not needed
-  * Tidy up PPU code
-  * Tidy up unused code in ppu
   * initialize cython arrays
+  * ppu comments could be better
+  * some hard coded values could be replaced with named constants (ppu, apu)
 * Test coverage
   * try more test ROMS
   * make some tests (use cc65?) of our own
@@ -96,7 +83,7 @@ Improvements and Corrections
   * odd nametable fetches used by MMC5
 * Open bus behaviour on memory
   * including controllers
-* check IRQ implementation works
+* Check IRQ implementation works
   * is used in a few places on the NES:  https://wiki.nesdev.com/w/index.php/IRQ
 
 ### Minor Todo

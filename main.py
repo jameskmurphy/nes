@@ -28,66 +28,66 @@ nes = NES("./roms/Dragon Warrior 3 (U).nes", log_file="./logs/nes.log", log_leve
 
 # Test ROMS
 
-# nes = NES("./tests/nestest/nestest.  nes", log_file="./logs/nes.log", log_level=logging.INFO)
+# nes = NES("./testroms/nestest/nestest.  nes", log_file="./logs/nes.log", log_level=logging.INFO)
 
 # passed
-# nes = NES("./tests/instr_test-v5/rom_singles/01-basics.nes", log_file="./logs/nes.log", log_level=logging.INFO)
-# nes = NES("./tests/instr_test-v5/rom_singles/02-implied.nes", log_file="./logs/nes.log", log_level=logging.INFO)
-# nes = NES("./tests/instr_test-v5/rom_singles/04-zero_page.nes", log_file="./logs/nes.log", log_level=logging.INFO)
-# nes = NES("./tests/instr_test-v5/rom_singles/05-zp_xy.nes", log_file="./logs/nes.log", log_level=logging.INFO)
-# nes = NES("./tests/instr_test-v5/rom_singles/06-absolute.nes", log_file="./logs/nes.log", log_level=logging.INFO)
-# nes = NES("./tests/instr_test-v5/rom_singles/08-ind_x.nes", log_file="./logs/nes.log", log_level=logging.INFO)
-# nes = NES("./tests/instr_test-v5/rom_singles/10-branches.nes", log_file="./logs/nes.log", log_level=logging.INFO)
-# nes = NES("./tests/instr_test-v5/rom_singles/11-stack.nes", log_file="./logs/nes.log", log_level=logging.INFO)
-# nes = NES("./tests/instr_test-v5/rom_singles/12-jmp_jsr.nes", log_file="./logs/nes.log", log_level=logging.INFO)
-# nes = NES("./tests/instr_test-v5/rom_singles/13-rts.nes", log_file="./logs/nes.log", log_level=logging.INFO)
-# nes = NES("./tests/instr_test-v5/rom_singles/14-rti.nes", log_file="./logs/nes.log", log_level=logging.INFO)
-# nes = NES("./tests/instr_test-v5/rom_singles/16-special.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+# nes = NES("./testroms/instr_test-v5/rom_singles/01-basics.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+# nes = NES("./testroms/instr_test-v5/rom_singles/02-implied.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+# nes = NES("./testroms/instr_test-v5/rom_singles/04-zero_page.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+# nes = NES("./testroms/instr_test-v5/rom_singles/05-zp_xy.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+# nes = NES("./testroms/instr_test-v5/rom_singles/06-absolute.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+# nes = NES("./testroms/instr_test-v5/rom_singles/08-ind_x.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+# nes = NES("./testroms/instr_test-v5/rom_singles/10-branches.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+# nes = NES("./testroms/instr_test-v5/rom_singles/11-stack.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+# nes = NES("./testroms/instr_test-v5/rom_singles/12-jmp_jsr.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+# nes = NES("./testroms/instr_test-v5/rom_singles/13-rts.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+# nes = NES("./testroms/instr_test-v5/rom_singles/14-rti.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+# nes = NES("./testroms/instr_test-v5/rom_singles/16-special.nes", log_file="./logs/nes.log", log_level=logging.INFO)
 
 # passed except undocumented level 2 failures
-# nes = NES("./tests/instr_test-v5/rom_singles/03-immediate.nes", log_file="./logs/nes.log", log_level=logging.INFO)
-# nes = NES("./tests/instr_test-v5/rom_singles/07-abs_xy.nes", log_file="./logs/nes.log", log_level=logging.INFO)
-# nes = NES("./tests/instr_test-v5/rom_singles/09-ind_y.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+# nes = NES("./testroms/instr_test-v5/rom_singles/03-immediate.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+# nes = NES("./testroms/instr_test-v5/rom_singles/07-abs_xy.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+# nes = NES("./testroms/instr_test-v5/rom_singles/09-ind_y.nes", log_file="./logs/nes.log", log_level=logging.INFO)
 
 # ************ FAILED ***************
-# nes = NES("./tests/instr_test-v5/rom_singles/15-brk.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+# nes = NES("./testroms/instr_test-v5/rom_singles/15-brk.nes", log_file="./logs/nes.log", log_level=logging.INFO)
 
 
 # not sure
-# nes = NES("./tests/nmi_sync/demo_ntsc.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+# nes = NES("./testroms/nmi_sync/demo_ntsc.nes", log_file="./logs/nes.log", log_level=logging.INFO)
 
 # passed
-# nes = NES("./tests/blargg_ppu_tests_2005.09.15b/palette_ram.nes", log_file="./logs/nes.log", log_level=logging.INFO)
-# nes = NES("./tests/blargg_ppu_tests_2005.09.15b/sprite_ram.nes", log_file="./logs/nes.log", log_level=logging.INFO)
-# nes = NES("./tests/blargg_ppu_tests_2005.09.15b/vram_access.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+# nes = NES("./testroms/blargg_ppu_tests_2005.09.15b/palette_ram.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+# nes = NES("./testroms/blargg_ppu_tests_2005.09.15b/sprite_ram.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+# nes = NES("./testroms/blargg_ppu_tests_2005.09.15b/vram_access.nes", log_file="./logs/nes.log", log_level=logging.INFO)
 
 # ************ FAILED ***************
-# nes = NES("./tests/blargg_ppu_tests_2005.09.15b/vbl_clear_time.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+# nes = NES("./testroms/blargg_ppu_tests_2005.09.15b/vbl_clear_time.nes", log_file="./logs/nes.log", log_level=logging.INFO)
 #  \-- fails with vbl cleared too late, but not too worried as vbl period is showing up as 2274, which is about right
 
 
 # APU Tests
 # passed
-# nes = NES("./tests/blargg_apu_2005.07.30/02.len_table.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+# nes = NES("./testroms/blargg_apu_2005.07.30/02.len_table.nes", log_file="./logs/nes.log", log_level=logging.INFO)
 
 
-# nes = NES("./tests/test_tri_lin_ctr/lin_ctr.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+# nes = NES("./testroms/test_tri_lin_ctr/lin_ctr.nes", log_file="./logs/nes.log", log_level=logging.INFO)
 
 
 # ************ FAILED ***************
-# nes = NES("./tests/blargg_apu_2005.07.30/01.len_ctr.nes", log_file="./logs/nes.log", log_level=logging.INFO)
-# nes = NES("./tests/blargg_apu_2005.07.30/03.irq_flag.nes", log_file="./logs/nes.log", log_level=logging.INFO)
-# nes = NES("./tests/blargg_apu_2005.07.30/04.clock_jitter.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+# nes = NES("./testroms/blargg_apu_2005.07.30/01.len_ctr.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+# nes = NES("./testroms/blargg_apu_2005.07.30/03.irq_flag.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+# nes = NES("./testroms/blargg_apu_2005.07.30/04.clock_jitter.nes", log_file="./logs/nes.log", log_level=logging.INFO)
 
 
-#nes = NES("./tests/square_timer_div2/square_timer_div2.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+#nes = NES("./testroms/square_timer_div2/square_timer_div2.nes", log_file="./logs/nes.log", log_level=logging.INFO)
 
-#nes = NES("./tests/test_apu_timers/noise_pitch.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+#nes = NES("./testroms/test_apu_timers/noise_pitch.nes", log_file="./logs/nes.log", log_level=logging.INFO)
 
 
 # not sure
-# nes = NES("./tests/test_apu_timers/square_pitch.nes", log_file="./logs/nes.log", log_level=logging.INFO)
-# nes = NES("./tests/test_apu_timers/triangle_pitch.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+# nes = NES("./testroms/test_apu_timers/square_pitch.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+# nes = NES("./testroms/test_apu_timers/triangle_pitch.nes", log_file="./logs/nes.log", log_level=logging.INFO)
 
 
 nes.run()

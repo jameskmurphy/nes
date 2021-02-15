@@ -9,7 +9,7 @@ def setup_machine_basic():
     load_at = 0xC000 - 16   # don't know why the rom starts here, but it does
     memory = BigEmptyRAM()
     cpu = MOS6502(memory, support_BCD=False)  # don't support BCD on NES
-    rom, header = load_rom_raw("./tests/nestest/nestest.nes")
+    rom, header = load_rom_raw("./testroms/nestest/nestest.nes")
 
     # note that the rom is too long and overruns the memory so have to add the reset vector after
     # I don't know why this is (it is a NES rom) or how it should be loaded properly
@@ -20,7 +20,7 @@ def setup_machine_basic():
     return cpu
 
 def setup_machine_nes():
-    rom = ROM("./tests/nestest/nestest.nes")
+    rom = ROM("./testroms/nestest/nestest.nes")
     cart = rom.get_cart(prg_start=0xC000)  #NESCart0(rom_data=rom_data, load_rom_at=0xC000-16)
     cart.prg_start_addr = 0xC000
     memory = NESMappedRAM(cart=cart)
@@ -35,7 +35,7 @@ def nestest(num_instrs, suppress_until=0):
     error_lines = []
 
     # begin the test
-    with open("./tests/nestest/nestest.log", "rt") as f:
+    with open("./testroms/nestest/nestest.log", "rt") as f:
 
         cpu.reset()
 

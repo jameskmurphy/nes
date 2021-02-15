@@ -131,3 +131,6 @@ dmypy.json
 # NES specific stuff
 .nes
 .pal
+/roms
+*.ipynb
+/testroms

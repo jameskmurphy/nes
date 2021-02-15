@@ -3,22 +3,28 @@ Development Notes
 
 Development notes for the project listing todos, corrections and improvements that are still outstanding.
 
-Improvements and Corrections
-----------------------------
 
-### Errors
+Corrections
+-----------
 
-* Duck Tales has some sort of problem that causes status bar to disappear when character gets on it
-  * This actually might be correct behaviour - verify
-  * There is a slight timing problem leading to status bar ending in the mid-cycle
-  * When the main character gets to the bottom line of the status bar, sprite zero doesn't draw and the
-              status bar split seems to move up one line
+### Game Errors
+
+* (none outstanding)
+
+### Test Failures
+
 * Test failures:
   * BRK test failure (is this right?)
   * VBlank timing
+
+
+### Bad Behaviour
+
 * A bit short (about 50) of CPU cycles per cycle.  Why?
 
 
+Improvements
+------------
 
 ### Emulator Improvements
 
@@ -27,8 +33,24 @@ Improvements and Corrections
 * run frame by frame
   * take input keypresses
   * output frame bitmap, audio
-* options file
+* Config via options file
+  * pass this to NES on instantiation, also have a default one that is used otherwise
+  * config options
+    * sync mode
+    * input devices and keymaps
+    * resolution and scale
+    * fullscreen
 * GUI for startup?
+* ALE sytle interface
+  * Find lives, score counters for a few games
+  * fully headless operation
+  * eliminate pygame, pyaudio dependency when headless
+* pip installable
+* Debug features
+  * nametable viewer
+  * vram viewer
+  * memory viewer
+  * (made tricky by pygame one window limit)
 
 
 ### New Features
@@ -36,13 +58,16 @@ Improvements and Corrections
 * OpenGL shaders
   * CRT shader
   * smoothing shader
-* Mappers
-  * MMC 1
-  * MMC 3
-
 
 ### Major Todo
 
+* Mappers
+  * MMC 1
+    * mostly done and working
+    * RAM bank switching
+    * testing of 512k mem variants
+    * reject sequential writes to serial port (not ram)
+  * MMC 3
 * Still some sync problems sometimes
   * OpenGL adaptive audio sync is sometimes problematic
   * Syncing in all modes seems to be problematic with external monitor plugged in (MBP / 1x4k external on Thunderbolt )
@@ -50,7 +75,7 @@ Improvements and Corrections
   * Test DMC
   * Test IRQ
 * Code tidy up and comments
-  * initialize cython arrays
+  * initialize cython arrays - can just do with lists
   * ppu comments could be better
   * some hard coded values could be replaced with named constants (ppu, apu)
 * Test coverage

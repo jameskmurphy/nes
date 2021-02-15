@@ -6,6 +6,8 @@ from .system cimport InterruptListener
 # this odd mechanism allows (integer) constants to be shared between pyx files via pxd files
 # if these constants also need to be used from python use cpdef in place of cdef here
 cdef enum:
+    NUM_PPU_REGISTERS = 8
+
     # Register indices (this is not just an enum, this is the offset of the register in the CPU memory map from 0x2000)
     PPU_CTRL = 0
     PPU_MASK = 1
@@ -38,7 +40,7 @@ cdef enum:
     RENDER_BACKGROUND_MASK =    0b00001000
     #GREYSCALE_MASK =            0b00000001
 
-    # bit numbers of some important bits in registers
+     # bit numbers of some important bits in registers
     # ppu_status
     V_BLANK_BIT = 7             # same for ppu_ctrl
 
@@ -55,8 +57,10 @@ cdef enum:
 
     # screen and sprite/tile sizes:
     PIXELS_PER_LINE = 341       # number of pixels per ppu scanline; only 256 of thes are visible
-    SCREEN_HEIGHT_PX = 240      # visible screen height (number of visible rows)
     SCREEN_WIDTH_PX = 256       # visible screen width (number of visible pixels per row)
+    SCREEN_HEIGHT_PX = 240      # visible screen height (number of visible rows)
+    VERTICAL_OVERSCAN_PX = 8    # The NES assumes that the top and bottom 8 rows will not be visible due to CRT overscan
+                                # see https://wiki.nesdev.com/w/index.php/Overscan
     PRERENDER_LINE = 261        # prerender scanline
 
     # size of a tile in the pattern table in bytes (width_px(8) x height_px(8) x bits_per_px(2) / bits_per_byte(8) == 16)
@@ -119,7 +123,7 @@ cdef class NESPPU:
     cdef void write_oam(self, unsigned char* data)
 
     # screen buffer copy and clear
-    cpdef void copy_screen_buffer_to(self, unsigned int[:, :] dest)
+    cpdef void copy_screen_buffer_to(self, unsigned int[:, :] dest, bint include_vertical_overscan=?)
     cdef void _clear_to_bkg(self)
 
     # registers read/write
@@ -134,6 +138,7 @@ cdef class NESPPU:
     cdef void increment_pixel(self)
     cdef void _increment_vram_address(self)
     cdef void _trigger_nmi(self)
+    cdef void _reset_effective_y(self)
 
     # sprite rendering
     cdef void _prefetch_active_sprites(self)

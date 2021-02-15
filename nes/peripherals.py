@@ -7,17 +7,43 @@ from OpenGL.GL import *
 
 import array
 
-class Screen:
+class ScreenBase:
+    """
+    Base class for screens.  Not library specific.
+    """
+    WIDTH_PX = 256
+    HEIGHT_PX = 240
+    VISIBLE_HEIGHT_PX = 224
+
+    def __init__(self, ppu, scale=3, show_overscan=False):
+        self.ppu = ppu
+        self.width = self.WIDTH_PX
+        self.height = self.HEIGHT_PX if show_overscan else self.VISIBLE_HEIGHT_PX
+        self.scale = scale
+        self.show_overscan = show_overscan
+
+        self._text_buffer = []
+
+    def show(self):
+        raise NotImplementedError()
+
+    def clear(self):
+        raise NotImplementedError()
+
+    def add_text(self, text, position, color, ttl=1):
+        self._text_buffer.append((text, (position[0] * self.scale, position[1] * self.scale), color, ttl))
+
+    def update_text(self):
+        self._text_buffer = [(txt, pos, col, ttl - 1) for (txt, pos, col, ttl) in self._text_buffer if ttl > 1]
+
+
+class Screen(ScreenBase):
     """
     PyGame based screen.
     Keep all PyGame-specific stuff in here (don't want PyGame specific stuff all over the rest of the code)
     """
-
-    def __init__(self, ppu, width=256, height=240, scale=3, vsync=False):
-        self.ppu = ppu
-        self.width = width
-        self.height = height
-        self.scale = scale
+    def __init__(self, ppu, scale=3, vsync=False, show_overscan=False):
+        super().__init__(ppu, scale, show_overscan)
 
         # screens and buffers
         self.buffer_surf = pygame.Surface((self.width, self.height))
@@ -27,7 +53,6 @@ class Screen:
         # font for writing to HUD
         pygame.freetype.init()
         self.font = pygame.freetype.SysFont(pygame.font.get_default_font(), 12 * self.scale)
-        self._text_buffer = []
 
     def add_text(self, text, position, color, ttl=1):
         self._text_buffer.append((text, (position[0] * self.scale, position[1] * self.scale), color, ttl))
@@ -37,34 +62,31 @@ class Screen:
             self.font.render_to(surf, position, text, color)
 
     def show(self):
-        self.ppu.copy_screen_buffer_to(self.buffer_sa)
+        self.ppu.copy_screen_buffer_to(self.buffer_sa, self.show_overscan)
         pygame.transform.scale(self.buffer_surf, (self.width * self.scale, self.height * self.scale), self.screen)
         self._render_text(self.screen)
         pygame.display.flip()
-        self._text_buffer = [(txt, pos, col, ttl - 1) for (txt, pos, col, ttl) in self._text_buffer if ttl > 1]
+        self.update_text()
 
     def clear(self, color=(0, 0, 0)):
         self.buffer_surf.fill(color)
 
 
-class ScreenGL:
+class ScreenGL(ScreenBase):
     """
     PyGame / OpenGL based screen.
     Keep all PyGame-specific stuff in here (don't want PyGame specific stuff all over the rest of the code)
     """
 
-    def __init__(self, ppu, scale=3, vsync=False):
-        self.ppu = ppu
-        self.width = 256 * scale
-        self.height = 240 * scale
-        self.scale = scale
+    def __init__(self, ppu, scale=3, vsync=False, show_overscan=False):
+        super().__init__(ppu, scale, show_overscan)
 
         # screens and buffers
-        self.buffer_surf = pygame.Surface((256, 240))
+        self.buffer_surf = pygame.Surface((self.width, self.height))
         self.buffer_sa = pygame.surfarray.pixels2d(self.buffer_surf)
-        self.screen = pygame.display.set_mode((self.width, self.height), flags = pygame.DOUBLEBUF | pygame.OPENGL, vsync=vsync)
+        self.screen = pygame.display.set_mode((self.width * scale, self.height * scale), flags = pygame.DOUBLEBUF | pygame.OPENGL, vsync=vsync)
 
-        self.arr = bytearray([0] * (256 * 240 * 3))
+        self.arr = bytearray([0] * (self.width * self.height * 3))
         self.gltex = None   # the texture that we will use for the screen
         self.opengl_init()
 
@@ -78,7 +100,7 @@ class ScreenGL:
         Set up all the usual OpenGL boilerplate to get going
         """
         self.gltex = glGenTextures(1)
-        glViewport(0, 0, self.width, self.height)
+        glViewport(0, 0, self.width * self.scale, self.height * self.scale)
         glDepthRange(0, 1)
         glMatrixMode(GL_PROJECTION)
         glMatrixMode(GL_MODELVIEW)
@@ -127,9 +149,6 @@ class ScreenGL:
         glGenerateMipmap(GL_TEXTURE_2D)
         glBindTexture(GL_TEXTURE_2D, 0)
 
-    def add_text(self, text, position, color, ttl=1):
-        self._text_buffer.append((text, position, color, ttl))
-
     def _render_text(self, surf):
         for (text, position, color, _) in self._text_buffer:
             self.font.render_to(surf, position, text, color)
@@ -139,7 +158,7 @@ class ScreenGL:
         self._render_text(self.buffer_surf)
         self.show_gl()
         pygame.display.flip()
-        self._text_buffer = [(txt, pos, col, ttl - 1) for (txt, pos, col, ttl) in self._text_buffer if ttl > 1]
+        self.update_text()
 
     def clear(self, color=(0, 0, 0)):
         self.buffer_surf.fill(color)

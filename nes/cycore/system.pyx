@@ -74,7 +74,7 @@ cdef class NES:
 
 
 
-    def __init__(self, rom_file, screen_scale=3, log_file=None, log_level=None, prg_start=None, sync_mode=SYNC_PYGAME):
+    def __init__(self, rom_file, screen_scale=3, log_file=None, log_level=None, prg_start=None, sync_mode=SYNC_VSYNC):
         """
         Build a NES and cartridge from the bits and pieces we have lying around plus some rom data!  Also do some things
         like set up logging, etc.
@@ -90,6 +90,8 @@ cdef class NES:
         # supplies bits of hardware (memory in most cases, both ROM and potentially RAM) all over the system, so it
         # affects the actual hardware configuration of the system.
         self.cart = rom.get_cart(prg_start)
+
+        print(self.cart.read(0xFFFA), self.cart.read(0xFFFB), self.cart.read(0xFFFC), self.cart.read(0xFFFD), self.cart.read(0xFFFE), self.cart.read(0xFFFF))
 
         # game controllers have no dependencies
         self.controller1 = KeyboardController()
@@ -219,9 +221,9 @@ cdef class NES:
         There is some PyGame specific stuff in here in order to handle frame timing and checking for exits
         """
         cdef int vblank_started
-        cdef float volume = 0.5
+        cdef float volume = 0.
         cdef double fps, t_start=0.
-        cdef bint show_hud, log_cpu, mute, audio_drop=0
+        cdef bint show_hud=True, log_cpu=False, mute=False, audio_drop=False
         cdef int frame=0, frame_start=0, cpu_cycles=0, last_sound_buffer=0
 
         p = pyaudio.PyAudio()
@@ -238,12 +240,7 @@ cdef class NES:
                         stream_callback=self.apu.pyaudio_callback,
                         )
 
-        show_hud = True
-        log_cpu = False
-        mute = False
-
         player.start_stream()
-
         t_start = time.time()
 
         while True:
@@ -313,8 +310,8 @@ cdef class NES:
                     if self.apu.buffer_remaining() > last_sound_buffer and not audio_drop:
                         # if the rate is elevated and the sound buffer is growing, try reducing the rate
                         if self.apu.get_rate() > SAMPLE_RATE:
-                            self.apu.set_rate(self.apu.get_rate() - 48)
-                    elif self.apu.buffer_remaining() < last_sound_buffer or audio_drop:
+                            self.apu.set_rate(self.apu.get_rate() - 240)
+                    elif (self.apu.buffer_remaining() < last_sound_buffer or audio_drop) and self.apu.get_rate() < SAMPLE_RATE + 10000:
                         self.apu.set_rate(self.apu.get_rate() + 480)
 
                     last_sound_buffer = self.apu.buffer_remaining()
@@ -325,7 +322,6 @@ cdef class NES:
             if self.sync_mode == SYNC_PYGAME:
                 # if we are using pygame sync, we have to supply our own clock tick here
                 clock.tick(TARGET_FPS)
-
 
             if not player.is_active() and self.apu.buffer_remaining() > MIN_AUDIO_BUFFER_SAMPLES:
                 # try to (re)start the stream if it is not running if there is audio waiting
@@ -344,8 +340,8 @@ cdef class NES:
             else:
                 audio_drop = False
 
-            #0self.debug_draw_nametables()
-
+            #if frame % 60 == 0:
+            #    self.debug_draw_nametables()
             self.screen.show()
             frame += 1
 

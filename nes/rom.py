@@ -1,6 +1,6 @@
 import pyximport; pyximport.install()
 
-from .cycore.carts import NESCart0, NESCart2
+from .cycore.carts import NESCart0, NESCart1, NESCart2
 from .pycore.bitwise import upper_nibble, lower_nibble, bit_low, bit_high
 
 class ROM:
@@ -82,7 +82,7 @@ class ROM:
         if bit_high(nesheader[6], self.MIRROR_IGNORE_BIT):  # if this is set, cart must provide 4-page vram
             self.mirror_pattern = self.MIRROR_FOUR_SCREEN
             # todo: Not implemented!
-            raise NotImplementedError("Four screen mirror patter / nametables not currently supported")
+            raise NotImplementedError("Four screen mirror pattern / nametables not currently supported")
 
         # header byte 7
         self.mapper_id = upper_nibble(nesheader[7]) * 16 + upper_nibble(nesheader[6])
@@ -90,7 +90,7 @@ class ROM:
 
         if not self.nes2:
             # header byte 8 (apparently often unused)
-            self.prg_ram_bytes = min(1, nesheader[8]) * 8192
+            self.prg_ram_bytes = max(1, nesheader[8]) * 8192
             print("iNES (v1) Header")
         else:
             # NES 2.0 format
@@ -117,6 +117,11 @@ class ROM:
             self.chr_nvram_bytes = 64 << upper_nibble(nesheader[11])
 
         print("Mapper: {}".format(self.mapper_id))
+        print("prg_ram_bytes: {}".format(self.prg_ram_bytes))
+        print("chr_ram_bytes: {}".format(self.chr_ram_bytes))
+        print("prg_rom_bytes: {}".format(self.prg_rom_bytes))
+        print("chr_rom_bytes: {}".format(self.chr_rom_bytes))
+        #print("chr_ram_bytes: {}".format(self.chr_ram_bytes))
 
     def get_cart(self, prg_start):
         """
@@ -125,6 +130,15 @@ class ROM:
         if self.mapper_id == 0:
             return NESCart0(prg_rom_data=self.prg_rom_data,
                             chr_rom_data=self.chr_rom_data,
+                            nametable_mirror_pattern=self.mirror_pattern,
+                            )
+        elif self.mapper_id == 1:
+            if self.chr_ram_bytes and (self.chr_ram_bytes != len(self.chr_rom_data)):
+                raise ValueError("CHR RAM requested, but have not allocated the correct amount.")
+            return NESCart1(prg_rom_data=self.prg_rom_data,
+                            chr_rom_data=self.chr_rom_data,
+                            prg_ram_size_kb=self.prg_ram_bytes / 1024,
+                            chr_mem_writeable=True if self.chr_ram_bytes else False,
                             nametable_mirror_pattern=self.mirror_pattern,
                             )
         elif self.mapper_id == 2:

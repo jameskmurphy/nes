@@ -1,4 +1,8 @@
 # cython: profile=True, boundscheck=False, nonecheck=False
+DEF MIRROR_HORIZONTAL = (0, 0, 1, 1)
+DEF MIRROR_VERTICAL = (0, 1, 0, 1)
+DEF MIRROR_ONE_LOWER = (0, 0, 0, 0)
+DEF MIRROR_ONE_UPPER = (1, 1, 1, 1)
 
 cdef class NESCart:
     """
@@ -45,7 +49,7 @@ cdef class NESCart0(NESCart):
                  chr_rom_data=None,
                  prg_rom_writeable=False,   # whether or not the program memory is ROM or RAM
                  ram_size_kb=8,
-                 nametable_mirror_pattern=[0, 0, 1, 1]
+                 nametable_mirror_pattern=(0, 0, 1, 1)
                  ):
         super().__init__()
 
@@ -77,7 +81,8 @@ cdef class NESCart0(NESCart):
             self.chr_mem_writeable = True
 
         self.prg_start_addr = PRG_ROM_START
-        self.nametable_mirror_pattern = nametable_mirror_pattern
+        for i in range(4):
+            self.nametable_mirror_pattern[i] = nametable_mirror_pattern[i]
         self.prg_rom_writeable = prg_rom_writeable
 
     cdef unsigned char read(self, int address):
@@ -104,6 +109,292 @@ cdef class NESCart0(NESCart):
             self.chr_mem[address % M0_CHR_MEM_SIZE] = value
 
 
+### Mapper 1 (aka MMC1, SxROM) #########################################################################################
+# ref: https://wiki.nesdev.com/w/index.php/UxROM
+
+cdef class NESCart1(NESCart):
+    """
+    NES Cartridge type 1 (MMC1).  Common cartridge with bank-switched prg and chr rom.  Controlled by an internal shift
+    register that writes one of four five-bit internal registers (ctrl, prg_bank, chr_bank[2]) depending on the address
+    of the fifth write.
+
+    There are several MMC1 variants!  Not sure how to tell these all of these apart from iNES v1 header...
+
+    MMC1A always has PRG RAM enabled
+    MMC1B has PRG RAM enabled by default
+    MMC1C has PRG RAM disabled by default
+
+    SNROM, SOROM, SUROM and SXROM have 8kb CHR ROM (so may use upper CHR address bits for other things)
+
+    SUROM has 512kb PRG ROM
+     - there are only two games listed for this config in the cart database [2], and only a couple in the list [3]
+       therefore, it is not yet supported
+
+    SZROM (not implemented) has a different control bit for PRG RAM
+
+    References:
+        [1] https://wiki.nesdev.com/w/index.php/MMC1
+        [2] http://bootgod.dyndns.org:7777/
+        [3] http://tuxnes.sourceforge.net/nesmapper.txt
+    """
+    def __init__(self,
+                 prg_rom_data=None,
+                 chr_rom_data=None,
+                 chr_mem_writeable=False, # if True, the CHR memory is actually RAM, not ROM
+                 prg_ram_size_kb=8,       # size of prg RAM; must be in 8kb multiples, can be 0. RAM is at 0x6000-0x7FFF
+                 nametable_mirror_pattern=MIRROR_HORIZONTAL,
+                ):
+        super().__init__()
+
+        # copy the prg rom data to the memory banks
+        self.num_prg_banks = int(len(prg_rom_data) / M1_PRG_ROM_BANK_SIZE)
+        if self.num_prg_banks * M1_PRG_ROM_BANK_SIZE != len(prg_rom_data):
+            raise ValueError("prg_rom_data size ({} bytes) is not an exact multiple of bank size ({} bytes)".format(len(prg_rom_data), M1_PRG_ROM_BANK_SIZE))
+
+        for bnk in range(self.num_prg_banks):
+            for i in range(M1_PRG_ROM_BANK_SIZE):
+                self.banked_prg_rom[bnk][i] = prg_rom_data[bnk * M1_PRG_ROM_BANK_SIZE + i]
+
+        if self.num_prg_banks > 16:
+            # this is a 512kb prg rom ROM
+            self.has_512kb_prg_rom = True
+            self.num_prg_banks_per_page = 16
+        else:
+            # a <= 256kb prg rom ROM
+            self.has_512kb_prg_rom = False
+            self.num_prg_banks_per_page = self.num_prg_banks
+
+        # copy the chr rom data to the memory banks
+        self.num_chr_banks = int(len(chr_rom_data) / M1_CHR_ROM_BANK_SIZE)
+        if self.num_chr_banks * M1_CHR_ROM_BANK_SIZE != len(chr_rom_data):
+            raise ValueError("chr_rom_data size ({} bytes) is not an exact multiple of bank size ({} bytes)".format(len(chr_rom_data), M1_CHR_ROM_BANK_SIZE))
+
+        for bnk in range(self.num_chr_banks):
+            for i in range(M1_CHR_ROM_BANK_SIZE):
+                self.banked_chr_rom[bnk][i] = chr_rom_data[bnk * M1_CHR_ROM_BANK_SIZE + i]
+
+        self.chr_mem_writeable = chr_mem_writeable
+
+        # todo is this the right thing to do here?
+        if self.num_chr_banks == 0:
+            # if there is no chr rom, make an 8kb bank of ram
+            self.num_chr_banks = 2
+            self.chr_mem_writeable = True
+
+        # set the startup state of the cart
+        self.shift_ctr = 0  # shift counter, triggers when it reaches 5
+        self.shift = 0      # shift register to accumulate writes to registers
+        # there is only one prg bank switch, which can have one of three different effects depending on ctrl register
+        self.prg_bank = 0
+        self.chr_bank[:] = [0, 0]  # two chr bank registers
+        self.prg_ram_bank = 0
+        self.ctrl = 0
+
+        self.num_prg_ram_banks = int(prg_ram_size_kb * BYTES_PER_KB / M1_PRG_RAM_BANK_SIZE)
+        if self.num_prg_ram_banks * M1_PRG_RAM_BANK_SIZE != prg_ram_size_kb * BYTES_PER_KB:
+            raise ValueError("PRG RAM size must be a multiple of 8kb")
+
+        # used to deal with the special behaviour of 512kb prg rom ROMs
+        self.num_prg_banks_per_page = self.num_prg_banks if not self.has_512kb_prg_rom else 16
+
+        # set the nametable mirror pattern
+        self.nametable_mirror_pattern[:] = nametable_mirror_pattern
+
+        # set the nametable mirror bits (bottom two) of ctrl to the correct value
+        if tuple(nametable_mirror_pattern) == MIRROR_ONE_LOWER:
+            self.ctrl |= 0
+        elif tuple(nametable_mirror_pattern) == MIRROR_ONE_UPPER:
+            self.ctrl |= 1
+        elif tuple(nametable_mirror_pattern) == MIRROR_VERTICAL:
+            self.ctrl |= 2
+        elif tuple(nametable_mirror_pattern) == MIRROR_HORIZONTAL:
+            self.ctrl |= 3
+
+        # sets the PRG ROM bank mode to 3 (fix last bank at 0xC000, switch 16kb bank at 0x8000)
+        # see control register section in [1], which has a note on startup condition of ctrl
+        self.ctrl |= 0b00001100
+
+    cdef void write(self, int address, unsigned char value):
+
+        if address < M1_PRG_RAM_START:
+            # shouldn't be writing here
+            pass
+        elif M1_PRG_RAM_START <= address < M1_CTRL_REG_START:
+            if self.prg_bank & 0b10000 == 0:  # bit 4 being low is prg_ram enable
+                # todo: for some carts with ram banks, this should select the correct ram bank
+                self.ram[0][address % M1_PRG_RAM_BANK_SIZE] = value
+        elif address >= M1_CTRL_REG_START:
+            # everything else is a write to the shift register:
+            self._write_shift(address, value)
+
+    cdef void _write_shift(self, int address, unsigned char value):
+        """
+        Writes one bit to the internal shift register, or resets it.  On the fifth (non-reset) write, the value in the
+        shift register is written to one of the internal registers; which one is determined by the address of that
+        fifth write.
+        :param address:  address to write to; used on fifth write to select register to be written
+        :param value: value to write, only msb (reset) and lsb (data) bits are used
+        """
+        cdef unsigned char data, reset
+
+        data = value & 1          # lsb of value is the data
+        reset = (value >> 7) & 1  # msb of value is reset bit
+
+        if reset:
+            # "Reset shift register and write Control with (Control OR $0C), locking PRG ROM at $C000-$FFFF to the
+            # last bank."
+            self.shift = 0
+            self.shift_ctr = 0
+            self.ctrl |= 0x0C   # sets the PRG ROM bank mode to 3 (fix last bank at 0xC000, switch 16kb bank at 0x8000)
+            return
+
+        # put the data into the shift register, shifting the register right and putting the data in 4 (i.e. the 5th bit)
+        self.shift = (self.shift >> 1) | (data << 4)
+        self.shift_ctr += 1
+
+        #print("{:06b} in shift (#{})".format(self.shift, self.shift_ctr))
+
+        if self.shift_ctr == 5:
+            # this was the final write to the register and we can now transfer the contents of the shift register to the
+            # internal register in question.  We also reset the shift register (to 0) and counter.
+            if M1_CTRL_REG_START <= address < M1_CHR_REG_0_START:
+                self.ctrl = self.shift
+                # if we've written ctrl, we might have to update the mirror pattern:
+                self._set_nametable_mirror_pattern()
+                #print("{:06b} written to ctrl".format(self.ctrl))
+            elif M1_CHR_REG_0_START <= address < M1_CHR_REG_1_START:
+                self.chr_bank[0] = self.shift
+                #print("{} written to chr_bank[0]".format(self.chr_bank[0]))
+            elif M1_CHR_REG_1_START <= address < M1_PRG_REG_START:
+                self.chr_bank[1] = self.shift
+                #print("{} written to chr_bank[1]".format(self.chr_bank[1]))
+            elif M1_PRG_REG_START <= address:
+                self.prg_bank = self.shift
+                #print("{} written to prg_bank".format(self.prg_bank))
+            #else:
+                #print("UNMATCHED SHIFT FINISH {:04X}".format(address))
+
+            self.shift_ctr = 0
+            self.shift = 0
+
+    cdef void _set_nametable_mirror_pattern(self):
+        """
+        Updates the nametable mirror pattern to correspond to the value in ctrl
+        """
+        cdef int mirror_pattern
+        mirror_pattern = self.ctrl & 0b11
+        if mirror_pattern == 0:
+            self.nametable_mirror_pattern[:] = MIRROR_ONE_LOWER
+        elif mirror_pattern == 1:
+            self.nametable_mirror_pattern[:] = MIRROR_ONE_UPPER
+        elif mirror_pattern == 2:
+            self.nametable_mirror_pattern[:] = MIRROR_VERTICAL
+        elif mirror_pattern == 3:
+            self.nametable_mirror_pattern[:] = MIRROR_HORIZONTAL
+
+    cdef unsigned char read(self, int address):
+        """
+        Read from the PRG memory (connected to CPU).  The address and the internal state of the ctrl and prg_bank
+        registers determine the exact location of the memory read.
+        :param address: address to read from
+        :return: the one byte contents of the memory at address
+        """
+        cdef int bank=0, mode=-1
+        cdef unsigned char value
+        if self.has_512kb_prg_rom and self.chr_bank[0] & 0b10000 > 0:
+            # if we have one of the 512kb ROMs, the "page" of prg_rom is set by the top bit of chr_bank
+            # here we just use chr_bank[0] since both chr_bank[0] and chr_bank[1] must be the same otherwise undefined
+            # behaviour results [1].
+            bank = 16
+
+        if M1_PRG_RAM_START <= address < M1_PRG_ROM_BANK0_START:
+            # There might be more than 1 bank of RAM or non at all, need to check it is enabled
+            if self.prg_bank & 0b10000 == 0:  # bit 4 being low is prg_ram enable
+                # prg-ram enabled
+                # todo: need to do the correct ram bank if this is one of the ones with switchable ram banks
+                value = self.ram[0][address % M1_PRG_RAM_BANK_SIZE]
+            else:
+                # open-bus behaviour
+                # todo: should be open bus behaviour, but not sure yet how to implement this
+                value = self.ram[0][address % M1_PRG_RAM_BANK_SIZE]
+        elif M1_PRG_ROM_BANK0_START <= address < M1_PRG_ROM_BANK1_START:
+            # read from prg rom bank 0 (this is an address between 0x8000 and 0xBFFF)
+            # which bank is bank 0 is determined by the prg rom mode (in ctrl) and the prg_bank register
+            mode = (self.ctrl & 0b1100) >> 2
+            if mode == 0 or mode == 1:   # 32 kb mode
+                # in 32kb mode, ignore lower bit (and in this case we are in the lower of the two 16kb banks, so lsb=0)
+                bank += (self.prg_bank & 0b1110) % self.num_prg_banks_per_page
+                value = self.banked_prg_rom[bank][address % M1_PRG_ROM_BANK_SIZE]
+            elif mode == 2:
+                # bank 0 is fixed to first bank at 0x8000 (but that is the area that address is in, so read first bank)
+                # (in 512kb ROMs, even this "fixed" bank is switched to the second page)
+                value = self.banked_prg_rom[bank][address % M1_PRG_ROM_BANK_SIZE]
+            elif mode == 3:
+                # bank 0 is switched according to prg_bank
+                bank += (self.prg_bank & 0b1111) % self.num_prg_banks_per_page
+                value = self.banked_prg_rom[bank][address % M1_PRG_ROM_BANK_SIZE]
+        elif M1_PRG_ROM_BANK1_START <= address:
+            # read from prg rom bank 1 (this is an address between 0xC000 and 0xFFFF)
+            # which bank is bank 1 is determined by the prg rom mode (in ctrl) and the prg_bank register
+            mode = (self.ctrl & 0b1100) >> 2
+            if mode == 0 or mode == 1:  # 32 kb mode
+                # in 32kb mode, ignore lower bit of the prg_bank, but now we are in the upper of the two banks, so the
+                # lsb must be set to 1
+                bank += ((self.prg_bank & 0b1110) + 1) % self.num_prg_banks_per_page
+                value = self.banked_prg_rom[bank][address % M1_PRG_ROM_BANK_SIZE]
+            elif mode == 2:
+                # bank 1 is switched according to prg_bank
+                bank += (self.prg_bank & 0b1111) % self.num_prg_banks_per_page
+                value = self.banked_prg_rom[bank][address % M1_PRG_ROM_BANK_SIZE]
+            elif mode == 3:
+                # bank 1 is fixed to last bank
+                bank += self.num_prg_banks_per_page - 1
+                value = self.banked_prg_rom[bank][address % M1_PRG_ROM_BANK_SIZE]
+
+        #print("read {:02X} from {:04X} -- bank {}, mode={}, prg_bank={}, num_prg_banks={}".format(value, address, bank, mode, self.prg_bank & 0b1111, self.num_prg_banks))
+        return value
+
+    cdef int _get_chr_bank(self, int address):
+        """
+        Get the bank in the case of a read/write to the chr memory
+        :param address:
+        :return:
+        """
+        cdef int mode_8kb, mask
+        # which addressing mode?  8kb or (if this is false) 4kb
+        mode_8kb = (self.ctrl & 0b10000) == 0
+        # is the address in bank 0 or bank 1?
+        address_bank = address >= M1_CHR_ROM_BANK1_START
+        # just use the lower line for addressing if only have 2 banks; higher lines might be in use for other things
+        mask = 0b00001 if self.num_chr_banks <= 2 else 0b11111
+        if mode_8kb:
+            # use the address in chr_bank[0], ignoring the low bit.
+            # in this case bank (chr_bank[0] & 0b11110) is at 0x0000
+            #               and (chr_bank[0] & 0b11110) + 1 is at 0x1000
+            mask &= 0b11110
+            return (self.chr_bank[0] & mask) + address_bank
+        else:
+            # 4kb mode
+            return self.chr_bank[address_bank] & mask
+
+    cdef void write_ppu(self, int address, unsigned char value):
+        """
+        Write a byte to CHR memory; should only work in carts with RAM here.
+        """
+        if not self.chr_mem_writeable:
+            # this is a ROM, so do nothing
+            return
+        self.banked_chr_rom[self._get_chr_bank(address)][address % M1_CHR_ROM_BANK_SIZE] = value
+
+    cdef unsigned char read_ppu(self, int address):
+        """
+        Read from the chr rom; the exact piece of chr rom read depends on the internal state of the chr_bank registers
+        :param address: address to read from
+        :return: a byte read from chr rom
+        """
+        return self.banked_chr_rom[self._get_chr_bank(address)][address % M1_CHR_ROM_BANK_SIZE]
+
+
 ### Mapper 2 (aka UNROM, UOROM) ########################################################################################
 # ref: https://wiki.nesdev.com/w/index.php/UxROM
 
@@ -117,7 +408,7 @@ cdef class NESCart2(NESCart0):
              chr_rom_data=None,
              prg_rom_writeable=False,   # whether or not the program memory is ROM or RAM
              ram_size_kb=8,
-             nametable_mirror_pattern=[0, 0, 1, 1],
+             nametable_mirror_pattern=(0, 0, 1, 1),
              emulate_bus_conflicts=False   # whether or not to emulate bus conflicts on prg_bank select writes
              ):
         super().__init__(prg_rom_data=None,    # don't want to write prg_rom_data to the prg_rom because will be too big

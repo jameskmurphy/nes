@@ -5,13 +5,24 @@ import logging
 from nes.cycore.system import NES
 from nes import LOG_CPU, LOG_PPU
 
+# Mapper 0
 #nes = NES("./roms/Super Mario Bros. (Japan, USA).nes", log_file="./logs/nes.log", log_level=logging.INFO)
 #nes = NES("./roms/Balloon_fight.nes", log_file="./logs/nes.log", log_level=logging.INFO)
 #nes = NES("./roms/donkey kong.nes", log_file="./logs/nes.log", log_level=logging.INFO)
 #nes = NES("./roms/Ice Climber.nes", log_file="./logs/nes.log", log_level=logging.INFO)
 
-nes = NES("./roms/Mega Man (USA).nes", log_file="./logs/nes.log", log_level=logging.INFO)
+# Mapper 2
+#nes = NES("./roms/Mega Man (USA).nes", log_file="./logs/nes.log", log_level=logging.INFO)
 #nes = NES("./roms/DuckTales (USA).nes", log_file="./logs/nes.log", log_level=logging.INFO)
+
+# Mapper 1
+#nes = NES("./roms/Silk Worm (USA).nes", log_file="./logs/nes.log", log_level=logging.INFO)
+#nes = NES("./roms/Metroid (USA).nes", log_file="./logs/nes.log", log_level=logging.INFO)
+#nes = NES("./roms/Legend of Zelda, The (USA).nes", log_file="./logs/nes.log", log_level=logging.INFO)
+nes = NES("./roms/Dragon Warrior 3 (U).nes", log_file="./logs/nes.log", log_level=logging.INFO)
+#nes = NES("./roms/Castlevania II - Simon's Quest (USA).nes", log_file="./logs/nes.log", log_level=logging.INFO)
+#nes = NES("./roms/Ikari III - The Rescue (USA).nes", log_file="./logs/nes.log", log_level=logging.INFO)
+
 
 #nes = NES.load("test.p")
 

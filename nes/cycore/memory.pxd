@@ -54,5 +54,3 @@ cdef class NESVRAM(MemoryBase):
     ###### functions ##########################
     cdef unsigned char read(self, int address)
     cdef void write(self, int address, unsigned char value)
-
-    cdef _set_nametable_mirror_pattern(self)

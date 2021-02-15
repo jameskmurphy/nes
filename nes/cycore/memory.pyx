@@ -18,8 +18,6 @@ cdef class MemoryBase:
 
 ###### Main Memory #####################################################################################################
 
-DEF NUM_PPU_REGISTERS = 8       # number of ppu registers
-
 # NES Main memory map locations
 DEF RAM_END = 0x2000            # NES main ram to here  (2kb mirrored 4x)
 DEF PPU_END = 0x4000            # PPU registers to here
@@ -31,7 +29,7 @@ DEF CONTROLLER2 = 0x4017        # port for controller 2 (read only, writes to th
 DEF CART_START = 0x4020         # start of cartridge address space
 
 # OAM memory size for the DMA transfer
-from ppu cimport OAM_SIZE_BYTES
+from ppu cimport OAM_SIZE_BYTES, NUM_PPU_REGISTERS
 
 
 cdef class NESMappedRAM(MemoryBase):
@@ -97,8 +95,6 @@ cdef class NESMappedRAM(MemoryBase):
             self.ram[address % RAM_SIZE] = value
         elif address < PPU_END:  # PPU registers
             register_ix = address % NUM_PPU_REGISTERS
-            #if register_ix==5:
-            #    print("mem: {} -> ppu 5  ({:04X})".format(value, address))
             self.ppu.write_register(register_ix, value)
         elif address < APU_END:
             if address == OAM_DMA:
@@ -175,12 +171,6 @@ cdef class NESVRAM(MemoryBase):
         if nametable_size_bytes != NAMETABLES_SIZE_BYTES:
             # There are a few carts that can provide extra nametable space, but that is not yet supported
             raise ValueError("Different sized nametables not implemented")
-        self._set_nametable_mirror_pattern()
-
-    cdef _set_nametable_mirror_pattern(self):
-        cdef int i
-        for i in range(4):
-            self.nametable_mirror_pattern[i] = self.cart.nametable_mirror_pattern[i]
 
     cdef unsigned char read(self, int address):
         cdef unsigned char value
@@ -196,7 +186,7 @@ cdef class NESVRAM(MemoryBase):
 
             # some of the pages (e.g. 2 and 3) are mirrored, so for these, find the underlying
             # namepage that they point to based on the mirror pattern
-            true_page = self.nametable_mirror_pattern[page]
+            true_page = self.cart.nametable_mirror_pattern[page]
             value = self._nametables[true_page * NAMETABLE_LENGTH_BYTES + offset]
         else:
             # palette table
@@ -220,7 +210,7 @@ cdef class NESVRAM(MemoryBase):
 
             # some of the pages (e.g. 2 and 3) are mirrored, so for these, find the underlying
             # namepage that they point to based on the mirror pattern
-            true_page = self.nametable_mirror_pattern[page]
+            true_page = self.cart.nametable_mirror_pattern[page]
             self._nametables[true_page * NAMETABLE_LENGTH_BYTES + offset] = value
         else:
             # palette table

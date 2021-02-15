@@ -3,6 +3,9 @@ Cython declarations for the NES cartridges
 """
 
 cdef enum:
+    BYTES_PER_KB = 1024
+
+cdef enum:
     # cart memory map - note that some memory is connected to CPU bus, others to PPU bus
     RAM_START = 0x6000      # address in the CPU memory space
     PRG_ROM_START = 0x8000  # address in the CPU memory space
@@ -13,7 +16,7 @@ cdef class NESCart:
     """
     NES Cartridge interface
     """
-    cpdef int nametable_mirror_pattern[4]
+    cdef int nametable_mirror_pattern[4]
 
     cdef unsigned char read(self, int address)
     cdef void write(self, int address, unsigned char value)
@@ -27,9 +30,9 @@ cdef class NESCart:
 # integer", so it's not clear what that is ending up doing.  For now, just name the constants with the mapper number.
 cdef enum:
     # maximum memory sizes; these are allocated but might not all be used (but are so small it doesn't matter)
-    M0_MAX_CART_RAM_SIZE = 8 * 1024   # up to 8kB of RAM
-    M0_MAX_PRG_ROM_SIZE = 32 * 1024   # up to 32kB of program ROM
-    M0_CHR_MEM_SIZE = 8 * 1024        # always (?) 8kB of chr memory (can be RAM or always ROM?)
+    M0_MAX_CART_RAM_SIZE = 8 * BYTES_PER_KB   # up to 8kB of RAM
+    M0_MAX_PRG_ROM_SIZE = 32 * BYTES_PER_KB   # up to 32kB of program ROM
+    M0_CHR_MEM_SIZE = 8 * BYTES_PER_KB        # always (?) 8kB of chr memory (can be RAM or always ROM?)
 
 
 cdef class NESCart0(NESCart):
@@ -48,13 +51,78 @@ cdef class NESCart0(NESCart):
     cdef void write_ppu(self, int address, unsigned char value)
 
 
+### Mapper 1 (aka MMC1, SxROM) #########################################################################################
+# ref: https://wiki.nesdev.com/w/index.php/MMC1
+
+cdef enum:
+    # maximum memory sizes; these are allocated but might not all be used (but are so small it doesn't matter)
+    M1_PRG_RAM_BANK_SIZE = 8 * BYTES_PER_KB    # 8kB RAM banks (can be zero of these)
+    M1_MAX_PRG_RAM_BANKS = 4                   # can have up to 4 x 8kb RAM banks, but only on SXROM
+    M1_PRG_ROM_BANK_SIZE = 16 * BYTES_PER_KB   # Each bank is 16kB of program ROM
+    M1_MAX_PRG_BANKS = 32                      # up to 512kB of program ROM (16x16kb)
+    M1_CHR_ROM_BANK_SIZE = 4 * BYTES_PER_KB    # chr rom in 4kB banks
+    M1_MAX_CHR_BANKS = 32                      # up to 128kb of CHR rom in (up to 32 x 4kb)
+
+    # main memory map (read)
+    # 0x6000-0x7FFF 8kb PRG RAM
+    # 0x8000-0xBFFF 16kb PRG ROM bank 0 (read only)
+    # 0xC000-0xFFFF 16kb PRG ROM bank 1 (read only)
+    M1_PRG_RAM_START = 0x6000
+    M1_PRG_ROM_BANK0_START = 0x8000
+    M1_PRG_ROM_BANK1_START = 0xC000
+
+    # main memory map (write)
+    # 0x8000-0xFFFF write only: write a bit to shift register; fifth write commits shift -> internal register, depending
+    #                           on address of that fifth write only.
+    # Fifth-write addresses:
+    # 0x8000-0x9FFF control register
+    # 0xA000-0xBFFF CHR bank 0 register
+    # 0xC000-0xDFFF CHR bank 1 register
+    # 0xE000-0xFFFF PRG bank register
+    M1_CTRL_REG_START = 0x8000
+    M1_CHR_REG_0_START = 0xA000
+    M1_CHR_REG_1_START = 0xC000
+    M1_PRG_REG_START = 0xE000
+
+    # vram memory map
+    # 0x0000-0x0FFF 4kb CHR ROM bank 0
+    # 0x1000-0x1FFF 4kb CHR ROM bank 1
+    M1_CHR_ROM_BANK0_START = 0x0000
+    M1_CHR_ROM_BANK1_START = 0x1000
+
+
+cdef class NESCart1(NESCart):
+    cdef int num_prg_banks, num_chr_banks, num_prg_ram_banks   # number of available memory banks in this cart
+    cdef bint chr_mem_writeable                 # whether or not CHR memory is writeable (i.e. RAM)
+    cdef int num_prg_banks_per_page             # == num_prg_banks unless in a 512kb rom, in which case is half
+    cdef unsigned char ctrl                     # control register
+    cdef unsigned char chr_bank[2]              # active chr rom banks
+    cdef unsigned char prg_bank, prg_ram_bank   # currently active prg rom/ram bank
+    cdef unsigned char shift                    # internal shift register
+    cdef int shift_ctr                          # which shift register bit we are currently on
+    cdef bint has_512kb_prg_rom                 # special case if the cart has 512kb of prg rom
+
+    cdef unsigned char banked_prg_rom[M1_MAX_PRG_BANKS][M1_PRG_ROM_BANK_SIZE]
+    cdef unsigned char banked_chr_rom[M1_MAX_CHR_BANKS][M1_CHR_ROM_BANK_SIZE]
+    cdef unsigned char ram[M1_MAX_PRG_RAM_BANKS][M1_PRG_RAM_BANK_SIZE]
+
+    cdef unsigned char read(self, int address)
+    cdef void write(self, int address, unsigned char value)
+    cdef unsigned char read_ppu(self, int address)
+    cdef void write_ppu(self, int address, unsigned char value)
+
+    cdef void _write_shift(self, int address, unsigned char value)
+    cdef void _set_nametable_mirror_pattern(self)
+    cdef int _get_chr_bank(self, int address)
+
+
 ### Mapper 2 (aka UNROM, UOROM) ########################################################################################
 # ref: https://wiki.nesdev.com/w/index.php/UxROM
 
 cdef enum:
     # maximum memory sizes; these are allocated but might not all be used (but are so small it doesn't matter)
-    M2_MAX_PRG_BANKS = 16              # Max number of banks; up to 8 in UNROM, up to 16 in UOROM
-    M2_PRG_ROM_BANK_SIZE = 16 * 1024   # Each bank is 16kB of program ROM
+    M2_MAX_PRG_BANKS = 16                      # Max number of banks; up to 8 in UNROM, up to 16 in UOROM
+    M2_PRG_ROM_BANK_SIZE = 16 * BYTES_PER_KB   # Each bank is 16kB of program ROM
 
     # memory map
     # 0x8000-0xBFFF:  banked prg_rom
@@ -75,7 +143,7 @@ cdef class NESCart2(NESCart0):
     # memory allocation can be avoided, making the code simpler and safer.  And 32kB is not too much memory to waste.
     cdef unsigned char banked_prg_rom[M2_MAX_PRG_BANKS][M2_PRG_ROM_BANK_SIZE]
     cdef unsigned char prg_bank, num_prg_banks
-    cdef int emulate_bus_conflicts   # whether or not to emulate bus conflicts
+    cdef bint emulate_bus_conflicts   # whether or not to emulate bus conflicts
 
     cdef unsigned char read(self, int address)
     cdef void write(self, int address, unsigned char value)

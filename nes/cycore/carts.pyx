@@ -110,7 +110,6 @@ cdef class NESCart0(NESCart):
 
 
 ### Mapper 1 (aka MMC1, SxROM) #########################################################################################
-# ref: https://wiki.nesdev.com/w/index.php/UxROM
 
 cdef class NESCart1(NESCart):
     """
@@ -119,23 +118,31 @@ cdef class NESCart1(NESCart):
     of the fifth write.
 
     There are several MMC1 variants!  Not sure how to tell these all of these apart from iNES v1 header...
+        MMC1A always has PRG RAM enabled
+        MMC1B has PRG RAM enabled by default
+        MMC1C has PRG RAM disabled by default
 
-    MMC1A always has PRG RAM enabled
-    MMC1B has PRG RAM enabled by default
-    MMC1C has PRG RAM disabled by default
+    Of the many MMC1 (SxROM) variants [4], a few have unusual properties that require additional modelling:
 
-    SNROM, SOROM, SUROM and SXROM have 8kb CHR ROM (so may use upper CHR address bits for other things)
+        - SOROM, SXROM and SZROM have bank switched RAM, and of these, only SOROM was available outside Japan [4].
 
-    SUROM has 512kb PRG ROM
-     - there are only two games listed for this config in the cart database [2], and only a couple in the list [3]
-       therefore, it is not yet supported
+        - SOROM has 16kb of PRG RAM (2 banks); bank selection is by bit 3 of the chr_bank register
+          - this is the only bank-switched prg_ram variant supported at present
 
-    SZROM (not implemented) has a different control bit for PRG RAM
+        - SXROM only has two Japan only games [5] and so it is not supported
+
+        - SUROM has 512kb PRG ROM
+           - there are only two games listed for this config in the cart database [2], and only a couple in the list [3]
+             therefore, it is not (yet?) supported
+
+        - SZROM (not implemented) has a different control bit for PRG RAM
 
     References:
         [1] https://wiki.nesdev.com/w/index.php/MMC1
         [2] http://bootgod.dyndns.org:7777/
         [3] http://tuxnes.sourceforge.net/nesmapper.txt
+        [4] https://wiki.nesdev.com/w/index.php/SxROM
+        [5] http://bootgod.dyndns.org:7777/search.php?unif_op=LIKE+`%25%40%25`&unif=SXROM
     """
     def __init__(self,
                  prg_rom_data=None,
@@ -157,12 +164,7 @@ cdef class NESCart1(NESCart):
 
         if self.num_prg_banks > 16:
             # this is a 512kb prg rom ROM
-            self.has_512kb_prg_rom = True
-            self.num_prg_banks_per_page = 16
-        else:
-            # a <= 256kb prg rom ROM
-            self.has_512kb_prg_rom = False
-            self.num_prg_banks_per_page = self.num_prg_banks
+            raise ValueError("512kb MMC1 ROMs are not currently supported.  Sorry Dragon Warrior III/IV.")
 
         # copy the chr rom data to the memory banks
         self.num_chr_banks = int(len(chr_rom_data) / M1_CHR_ROM_BANK_SIZE)
@@ -193,9 +195,8 @@ cdef class NESCart1(NESCart):
         self.num_prg_ram_banks = int(prg_ram_size_kb * BYTES_PER_KB / M1_PRG_RAM_BANK_SIZE)
         if self.num_prg_ram_banks * M1_PRG_RAM_BANK_SIZE != prg_ram_size_kb * BYTES_PER_KB:
             raise ValueError("PRG RAM size must be a multiple of 8kb")
-
-        # used to deal with the special behaviour of 512kb prg rom ROMs
-        self.num_prg_banks_per_page = self.num_prg_banks if not self.has_512kb_prg_rom else 16
+        if self.num_prg_ram_banks > 2:
+            raise ValueError("PRG RAM with more than two banks (>16kb) is not supported.  This seems to be a rare format (SUROM or SXROM).")
 
         # set the nametable mirror pattern
         self.nametable_mirror_pattern[:] = nametable_mirror_pattern
@@ -301,38 +302,35 @@ cdef class NESCart1(NESCart):
         """
         cdef int bank=0, mode=-1
         cdef unsigned char value
-        if self.has_512kb_prg_rom and self.chr_bank[0] & 0b10000 > 0:
-            # if we have one of the 512kb ROMs, the "page" of prg_rom is set by the top bit of chr_bank
-            # here we just use chr_bank[0] since both chr_bank[0] and chr_bank[1] must be the same otherwise undefined
-            # behaviour results [1].
-            bank = 16
 
         if M1_PRG_RAM_START <= address < M1_PRG_ROM_BANK0_START:
             # There might be more than 1 bank of RAM or non at all, need to check it is enabled
             if self.prg_bank & 0b10000 == 0:  # bit 4 being low is prg_ram enable
                 # prg-ram enabled
-                # todo: need to do the correct ram bank if this is one of the ones with switchable ram banks
-                value = self.ram[0][address % M1_PRG_RAM_BANK_SIZE]
+                if self.num_prg_ram_banks > 1 and (self.chr_bank[0] & 0b1000) > 0:
+                    # bank-switched prg ram; only SOROM is supported of this type, and this has the selection bit in
+                    # bit 3 of the chr_bank register
+                    bank = (self.chr_bank[0] >> 3) & 1
+                value = self.ram[bank][address % M1_PRG_RAM_BANK_SIZE]
             else:
                 # open-bus behaviour
                 # todo: should be open bus behaviour, but not sure yet how to implement this
                 value = self.ram[0][address % M1_PRG_RAM_BANK_SIZE]
+            return value
         elif M1_PRG_ROM_BANK0_START <= address < M1_PRG_ROM_BANK1_START:
             # read from prg rom bank 0 (this is an address between 0x8000 and 0xBFFF)
             # which bank is bank 0 is determined by the prg rom mode (in ctrl) and the prg_bank register
             mode = (self.ctrl & 0b1100) >> 2
             if mode == 0 or mode == 1:   # 32 kb mode
                 # in 32kb mode, ignore lower bit (and in this case we are in the lower of the two 16kb banks, so lsb=0)
-                bank += (self.prg_bank & 0b1110) % self.num_prg_banks_per_page
-                value = self.banked_prg_rom[bank][address % M1_PRG_ROM_BANK_SIZE]
+                bank = (self.prg_bank & 0b1110) % self.num_prg_banks
             elif mode == 2:
                 # bank 0 is fixed to first bank at 0x8000 (but that is the area that address is in, so read first bank)
                 # (in 512kb ROMs, even this "fixed" bank is switched to the second page)
-                value = self.banked_prg_rom[bank][address % M1_PRG_ROM_BANK_SIZE]
+                bank = 0
             elif mode == 3:
                 # bank 0 is switched according to prg_bank
-                bank += (self.prg_bank & 0b1111) % self.num_prg_banks_per_page
-                value = self.banked_prg_rom[bank][address % M1_PRG_ROM_BANK_SIZE]
+                bank = (self.prg_bank & 0b1111) % self.num_prg_banks
         elif M1_PRG_ROM_BANK1_START <= address:
             # read from prg rom bank 1 (this is an address between 0xC000 and 0xFFFF)
             # which bank is bank 1 is determined by the prg rom mode (in ctrl) and the prg_bank register
@@ -340,18 +338,15 @@ cdef class NESCart1(NESCart):
             if mode == 0 or mode == 1:  # 32 kb mode
                 # in 32kb mode, ignore lower bit of the prg_bank, but now we are in the upper of the two banks, so the
                 # lsb must be set to 1
-                bank += ((self.prg_bank & 0b1110) + 1) % self.num_prg_banks_per_page
-                value = self.banked_prg_rom[bank][address % M1_PRG_ROM_BANK_SIZE]
+                bank = ((self.prg_bank & 0b1110) + 1) % self.num_prg_banks
             elif mode == 2:
                 # bank 1 is switched according to prg_bank
-                bank += (self.prg_bank & 0b1111) % self.num_prg_banks_per_page
-                value = self.banked_prg_rom[bank][address % M1_PRG_ROM_BANK_SIZE]
+                bank = (self.prg_bank & 0b1111) % self.num_prg_banks
             elif mode == 3:
                 # bank 1 is fixed to last bank
-                bank += self.num_prg_banks_per_page - 1
-                value = self.banked_prg_rom[bank][address % M1_PRG_ROM_BANK_SIZE]
+                bank = self.num_prg_banks - 1
 
-        #print("read {:02X} from {:04X} -- bank {}, mode={}, prg_bank={}, num_prg_banks={}".format(value, address, bank, mode, self.prg_bank & 0b1111, self.num_prg_banks))
+        value = self.banked_prg_rom[bank][address % M1_PRG_ROM_BANK_SIZE]
         return value
 
     cdef int _get_chr_bank(self, int address):

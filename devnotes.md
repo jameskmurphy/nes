@@ -7,9 +7,10 @@ Development notes for the project listing todos, corrections and improvements th
 Corrections
 -----------
 
-### Game Errors
+### Game and Other Errors
 
-* (none outstanding)
+* APUPulse division by zero in generate_sample sometimes
+  * is fixed, but is it due to problem in sweep units?  Ghengis Khan reliably caused this.
 
 ### Test Failures
 
@@ -42,7 +43,7 @@ Improvements
     * fullscreen
 * GUI for startup?
 * ALE sytle interface
-  * Find lives, score counters for a few games
+  * Find lives, score counters for a few major games
   * fully headless operation
   * eliminate pygame, pyaudio dependency when headless
 * pip installable
@@ -61,13 +62,10 @@ Improvements
 
 ### Major Todo
 
-* Mappers
-  * MMC 1
-    * mostly done and working
-    * RAM bank switching
-    * testing of 512k mem variants
-    * reject sequential writes to serial port (not ram)
-  * MMC 3
+* Mappers  (currently support ~50% of games)
+  * MMC 3  (+ 25% ish of games)
+  * Mappers 3, 7 and 11 (all quite simple with quite a few games ~10% ish between them)
+  * Mapper 206 if easy from MMC3  (~2%)
 * Still some sync problems sometimes
   * OpenGL adaptive audio sync is sometimes problematic
   * Syncing in all modes seems to be problematic with external monitor plugged in (MBP / 1x4k external on Thunderbolt )
@@ -86,6 +84,9 @@ Improvements
 
 ### Medium Todo
 
+* MMC 1
+  * reject sequential writes to serial port (not ram)
+  * open bus behaviour when prg_ram not enabled
 * Interrut handling
   * could it be better?  e.g. should the IRQ line remain always high if never reset?  Should this keep triggering
     cpu IRQs? Should we just connect the CPU to the IRQ/NMI lines directly (e.g. it reads them from the
@@ -95,7 +96,7 @@ Improvements
     cycles
 * Screen
   * nicer OSD
-  * more efficient copy to texture?
+  * more efficient copy to texture for OGL mode?
 * Fine timing details
   * can some of these be improved?
   * vsync length

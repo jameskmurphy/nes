@@ -59,7 +59,7 @@ cdef enum:
     M1_PRG_RAM_BANK_SIZE = 8 * BYTES_PER_KB    # 8kB RAM banks (can be zero of these)
     M1_MAX_PRG_RAM_BANKS = 4                   # can have up to 4 x 8kb RAM banks, but only on SXROM
     M1_PRG_ROM_BANK_SIZE = 16 * BYTES_PER_KB   # Each bank is 16kB of program ROM
-    M1_MAX_PRG_BANKS = 32                      # up to 512kB of program ROM (16x16kb)
+    M1_MAX_PRG_BANKS = 16                      # up to 256kB of program ROM (16x16kb) - 512kb MMC1 ROMs not supported
     M1_CHR_ROM_BANK_SIZE = 4 * BYTES_PER_KB    # chr rom in 4kB banks
     M1_MAX_CHR_BANKS = 32                      # up to 128kb of CHR rom in (up to 32 x 4kb)
 
@@ -94,13 +94,11 @@ cdef enum:
 cdef class NESCart1(NESCart):
     cdef int num_prg_banks, num_chr_banks, num_prg_ram_banks   # number of available memory banks in this cart
     cdef bint chr_mem_writeable                 # whether or not CHR memory is writeable (i.e. RAM)
-    cdef int num_prg_banks_per_page             # == num_prg_banks unless in a 512kb rom, in which case is half
     cdef unsigned char ctrl                     # control register
     cdef unsigned char chr_bank[2]              # active chr rom banks
     cdef unsigned char prg_bank, prg_ram_bank   # currently active prg rom/ram bank
     cdef unsigned char shift                    # internal shift register
     cdef int shift_ctr                          # which shift register bit we are currently on
-    cdef bint has_512kb_prg_rom                 # special case if the cart has 512kb of prg rom
 
     cdef unsigned char banked_prg_rom[M1_MAX_PRG_BANKS][M1_PRG_ROM_BANK_SIZE]
     cdef unsigned char banked_chr_rom[M1_MAX_CHR_BANKS][M1_CHR_ROM_BANK_SIZE]

@@ -31,7 +31,7 @@ class ScreenBase:
         raise NotImplementedError()
 
     def add_text(self, text, position, color, ttl=1):
-        self._text_buffer.append((text, (position[0] * self.scale, position[1] * self.scale), color, ttl))
+        self._text_buffer.append((text, position, color, ttl))
 
     def update_text(self):
         self._text_buffer = [(txt, pos, col, ttl - 1) for (txt, pos, col, ttl) in self._text_buffer if ttl > 1]
@@ -59,7 +59,7 @@ class Screen(ScreenBase):
 
     def _render_text(self, surf):
         for (text, position, color, _) in self._text_buffer:
-            self.font.render_to(surf, position, text, color)
+            self.font.render_to(surf, (position[0] * self.scale, position[1] * self.scale), text, color)
 
     def show(self):
         self.ppu.copy_screen_buffer_to(self.buffer_sa, self.show_overscan)

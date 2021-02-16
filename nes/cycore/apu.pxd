@@ -81,7 +81,7 @@ cdef class APUTriangle(APUUnit):
 cdef class APUPulse(APUUnit):
     cdef:
         bint constant_volume, is_unit_1
-        int period, duty
+        unsigned int period, duty
         double phase
         APUEnvelope env
         bint sweep_enable, sweep_negate, sweep_reload
@@ -98,7 +98,7 @@ cdef class APUPulse(APUUnit):
 cdef class APUNoise(APUUnit):
     cdef:
         bint constant_volume, mode
-        int period, feedback, timer
+        unsigned int period, feedback, timer
         #double shift_ctr
         APUEnvelope env
 

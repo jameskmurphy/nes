@@ -110,7 +110,7 @@ cdef class APUTriangle(APUUnit):
         cdef int v
 
         # frequency of the triangle wave is given by timer as follows [4]:
-        freq_hz = CPU_FREQ_HZ * 1. / (32. * (self.period + 1))
+        freq_hz = CPU_FREQ_HZ * 1. / (32. * (self.period + 1.))
 
         # how much phase we step with each cycle is given by
         #   phase_per_samp = cycles per sample = (freq_hz / samples per second)
@@ -198,23 +198,7 @@ cdef class APUPulse(APUUnit):
         cdef double freq_hz
         cdef int v, volume, change_amount
 
-        # frequency of the pulse wave is given by timer AND the sweep [7].
-        #if self.sweep_enable:
-        #    adjusted_period = self.target_period
-        #else:
-        #    adjusted_period = self.period
-
-        #adjusted_period = self.period
-        #if self.sweep.enable:  ### ?????
-        #    change_amount = self.period >> self.sweep.shift
-        #    if self.sweep.negate:
-        #        change_amount = -change_amount
-        #        if self.is_unit_1 == 0:
-        #            change_amount -= 1
-        #    adjusted_period += change_amount
-            #print("sweep changing pulse {} period by {} (from {} to {})".format(pulse_ix, change_amount, self.pulse_timer[pulse_ix], period))
-
-        freq_hz = CPU_FREQ_HZ * 1. / (16. * (self.period + 1))
+        freq_hz = CPU_FREQ_HZ * 1. / (16. * (self.period + 1.))
 
         # how much phase we step with each cycle is given by
         #   phase_per_samp = cycles per sample = (freq_hz / samples per second)

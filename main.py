@@ -19,9 +19,10 @@ from nes import LOG_CPU, LOG_PPU
 #nes = NES("./roms/Silk Worm (USA).nes", log_file="./logs/nes.log", log_level=logging.INFO)
 #nes = NES("./roms/Metroid (USA).nes", log_file="./logs/nes.log", log_level=logging.INFO)
 #nes = NES("./roms/Legend of Zelda, The (USA).nes", log_file="./logs/nes.log", log_level=logging.INFO)
-nes = NES("./roms/Dragon Warrior 3 (U).nes", log_file="./logs/nes.log", log_level=logging.INFO)
+#nes = NES("./roms/Dragon Warrior 3 (U).nes", log_file="./logs/nes.log", log_level=logging.INFO)
 #nes = NES("./roms/Castlevania II - Simon's Quest (USA).nes", log_file="./logs/nes.log", log_level=logging.INFO)
 #nes = NES("./roms/Ikari III - The Rescue (USA).nes", log_file="./logs/nes.log", log_level=logging.INFO)
+nes = NES("./roms/Genghis Khan (USA).nes", log_file="./logs/nes.log", log_level=logging.INFO)
 
 
 #nes = NES.load("test.p")

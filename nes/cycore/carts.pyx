@@ -216,14 +216,18 @@ cdef class NESCart1(NESCart):
         self.ctrl |= 0b00001100
 
     cdef void write(self, int address, unsigned char value):
+        cdef int bank=0
 
         if address < M1_PRG_RAM_START:
             # shouldn't be writing here
             pass
         elif M1_PRG_RAM_START <= address < M1_CTRL_REG_START:
             if self.prg_bank & 0b10000 == 0:  # bit 4 being low is prg_ram enable
-                # todo: for some carts with ram banks, this should select the correct ram bank
-                self.ram[0][address % M1_PRG_RAM_BANK_SIZE] = value
+                if self.num_prg_ram_banks > 1 and (self.chr_bank[0] & 0b1000) > 0:
+                    # bank-switched prg ram; only SOROM is supported of this type, and this has the selection bit in
+                    # bit 3 of the chr_bank register
+                    bank = (self.chr_bank[0] >> 3) & 1
+                self.ram[bank][address % M1_PRG_RAM_BANK_SIZE] = value
         elif address >= M1_CTRL_REG_START:
             # everything else is a write to the shift register:
             self._write_shift(address, value)
@@ -315,7 +319,7 @@ cdef class NESCart1(NESCart):
             else:
                 # open-bus behaviour
                 # todo: should be open bus behaviour, but not sure yet how to implement this
-                value = self.ram[0][address % M1_PRG_RAM_BANK_SIZE]
+                value = 0
             return value
         elif M1_PRG_ROM_BANK0_START <= address < M1_PRG_ROM_BANK1_START:
             # read from prg rom bank 0 (this is an address between 0x8000 and 0xBFFF)

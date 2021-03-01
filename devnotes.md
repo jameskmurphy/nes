@@ -9,14 +9,17 @@ Corrections
 
 ### Game and Other Errors
 
-* APUPulse division by zero in generate_sample sometimes
-  * is fixed, but is it due to problem in sweep units?  Ghengis Khan reliably caused this.
+* APU
+  * Some popping at end of pulse notes.  Especially noticeable on stage 1-2 of SMB.  Possibly also a missed note?
+* MMC3
+  * Gun Nac doesn't boot
 
 ### Test Failures
 
 * Test failures:
   * BRK test failure (is this right?)
   * VBlank timing
+* APU test failures
 
 
 ### Bad Behaviour
@@ -31,9 +34,10 @@ Improvements
 
 * Save / load emulator state
 * Record / replay keypresses
-* run frame by frame
+* Fully headless operation
   * take input keypresses
   * output frame bitmap, audio
+  * headless without pygame, pyaudio
 * Config via options file
   * pass this to NES on instantiation, also have a default one that is used otherwise
   * config options
@@ -41,29 +45,29 @@ Improvements
     * input devices and keymaps
     * resolution and scale
     * fullscreen
-* GUI for startup?
 * ALE sytle interface
-  * Find lives, score counters for a few major games
-  * fully headless operation
-  * eliminate pygame, pyaudio dependency when headless
+  * Find lives, score counters, start point for a few games
 * pip installable
 * Debug features
-  * nametable viewer
+  * (made tricky by pygame one window limit)
+  * ~~nametable viewer~~
+    * make the config for this nicer
   * vram viewer
   * memory viewer
-  * (made tricky by pygame one window limit)
 
 
 ### New Features
 
 * OpenGL shaders
-  * CRT shader
+  * CRT shader (nice NTSC info here: https://wiki.nesdev.com/w/index.php/NTSC_video)
   * smoothing shader
+  * blur shader
+
 
 ### Major Todo
 
+* Check APU IRQ handling against new IRQ system
 * Mappers  (currently support ~50% of games)
-  * MMC 3  (+ 25% ish of games)
   * Mappers 3, 7 and 11 (all quite simple with quite a few games ~10% ish between them)
   * Mapper 206 if easy from MMC3  (~2%)
 * Still some sync problems sometimes
@@ -77,9 +81,14 @@ Improvements
   * ppu comments could be better
   * some hard coded values could be replaced with named constants (ppu, apu)
 * Test coverage
-  * try more test ROMS
+  * automation of some test roms
+     * ~~blargg instruction tests~~
+     * blargg ppu tests
+     * blargg apu tests
+     * mmc3 tests
+     * nestest
+  * make all these tests pass!
   * make some tests (use cc65?) of our own
-  * automation of testing
 
 
 ### Medium Todo
@@ -92,8 +101,7 @@ Improvements
     cpu IRQs? Should we just connect the CPU to the IRQ/NMI lines directly (e.g. it reads them from the
     appropriate devices each cycle) and then let the devices/cpu take care of clearing the flags?
 * Change OAM DMA handling to cycle-timed
-  * this will allow more accurate handling of DMC DMA pauses and can remove some complexity from APU run
-    cycles
+  * this will allow more accurate handling of DMC DMA pauses and can remove some complexity from APU run_cycles
 * Screen
   * nicer OSD
   * more efficient copy to texture for OGL mode?
@@ -102,8 +110,7 @@ Improvements
   * vsync length
   * frame length
 * PPU Details
-  * Greyscale mode
-  * Colours boost if ppu_mask bits set
+  * Colours boost if ppu_mask bits set (https://wiki.nesdev.com/w/index.php/Colour_emphasis)
   * implement sprite overflow incorrect behaviour
   * sprite zero hit details
   * odd nametable fetches used by MMC5
@@ -112,6 +119,7 @@ Improvements
 * Check IRQ implementation works
   * is used in a few places on the NES:  https://wiki.nesdev.com/w/index.php/IRQ
 
+
 ### Minor Todo
 
 * Colliding and lost interrupts
@@ -119,6 +127,10 @@ Improvements
 * Background palette hack
 * OAMDATA read behaviour during render
 * Performance
-  * Background latches
   * Palette cache (don't need to invalidate all, check hit rate)
   * Could move more of run_instr -> meta
+* Unodocumented instruction failures in blargg's tests:
+  * 0xAB ATX in 03-immediate
+  * 0xCB AXS in 03-immediate
+  * 0x9C SYA in 07-abs-xy
+  * 0x9E SXA in 07-abs-xy

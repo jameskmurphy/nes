@@ -56,7 +56,7 @@ cdef class MOS6502:
     cdef int trigger_nmi(self)
     cdef int trigger_irq(self)
     cdef int run_next_instr(self)
-    cdef unsigned char _status_to_byte(self, int b_flag)
+    cdef unsigned char _status_to_byte(self, bint b_flag)
     cdef void _status_from_byte(self, unsigned char sr_byte)
     cdef void push_stack(self, unsigned char v)
     cdef unsigned char pop_stack(self)

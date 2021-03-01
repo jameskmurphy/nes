@@ -55,5 +55,6 @@ cdef class NES:
 
     cdef int step(self, int log_cpu)
     cpdef void run(self)
+    cpdef void run_frame_headless(self)
 
     cdef void debug_draw_nametables(self)

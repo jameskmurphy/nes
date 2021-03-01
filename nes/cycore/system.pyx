@@ -1,11 +1,10 @@
-# cython: profile=True, boundscheck=False, nonecheck=False
-
+# cython: profile=True, boundscheck=True, nonecheck=False, language_level=3
 import pyximport; pyximport.install()
 
-from nes.cycore.mos6502 import MOS6502
-from nes.cycore.memory import NESMappedRAM
-from nes.cycore.ppu import NESPPU
-from nes.cycore.apu import NESAPU
+from nes.cycore.mos6502 cimport MOS6502
+from nes.cycore.memory cimport NESMappedRAM
+from nes.cycore.ppu cimport NESPPU
+from nes.cycore.apu cimport NESAPU
 from nes.rom import ROM
 from nes.peripherals import Screen, ScreenGL, KeyboardController, ControllerBase
 from nes import LOG_CPU, LOG_PPU, LOG_MEMORY
@@ -72,9 +71,7 @@ cdef class NES:
     OSD_NOTE_COLOR = (255, 128, 0)
     OSD_WARN_COLOR = (255, 0, 0)
 
-
-
-    def __init__(self, rom_file, screen_scale=3, log_file=None, log_level=None, prg_start=None, sync_mode=SYNC_VSYNC):
+    def __init__(self, rom_file, screen_scale=3, log_file=None, log_level=None, sync_mode=SYNC_VSYNC, verbose=True):
         """
         Build a NES and cartridge from the bits and pieces we have lying around plus some rom data!  Also do some things
         like set up logging, etc.
@@ -84,27 +81,26 @@ cdef class NES:
         # set up the logger
         self.init_logging(log_file, log_level)
 
-        rom = ROM(rom_file)
+        # the interrupt listener here is not a NES hardware device, it is an interrupt handler that is used to pass
+        # interrupts between the PPU, APU and sometimes even cartridge and CPU in this emulator
+        self.interrupt_listener = InterruptListener()
 
+        rom = ROM(rom_file, verbose=verbose)
         # the cartridge is a piece of hardware (unlike the ROM, which is just data) and must come first because it
-        # supplies bits of hardware (memory in most cases, both ROM and potentially RAM) all over the system, so it
+        # supplies bits of hardware (memory in most cases, both ROM and RAM) all over the system, so it
         # affects the actual hardware configuration of the system.
-        self.cart = rom.get_cart(prg_start)
-
-        print(self.cart.read(0xFFFA), self.cart.read(0xFFFB), self.cart.read(0xFFFC), self.cart.read(0xFFFD), self.cart.read(0xFFFE), self.cart.read(0xFFFF))
+        self.cart = rom.get_cart(self.interrupt_listener)
 
         # game controllers have no dependencies
         self.controller1 = KeyboardController()
         self.controller2 = ControllerBase(active=False)   # connect a second gamepad, but make it inactive for now
 
-        # the interrupt listener here is not a NES hardware device, it is an interrupt handler that is used to pass
-        # interrupts between the PPU and CPU in this emulator
-        self.interrupt_listener = InterruptListener()
+        # set up the APU and the PPU
         self.ppu = NESPPU(cart=self.cart, interrupt_listener=self.interrupt_listener)
         self.apu = NESAPU(interrupt_listener=self.interrupt_listener)
 
         # screen needs to have the PPU
-        self.screen = ScreenGL(ppu=self.ppu, scale=screen_scale, vsync=True if sync_mode == SYNC_VSYNC else False)
+        self.screen = Screen(ppu=self.ppu, scale=screen_scale, vsync=True if sync_mode == SYNC_VSYNC else False, nametable_panel=True)
         self.screen_scale = screen_scale
 
         # due to memory mapping, lots of things are connected to the main memory
@@ -173,6 +169,7 @@ cdef class NES:
         PPU (three per CPU cycle, at least on NTSC systems).
         """
         cdef int cpu_cycles=0
+
         cdef bint vblank_started=False
 
         if self.interrupt_listener.any_active():
@@ -189,9 +186,13 @@ cdef class NES:
             elif self.interrupt_listener.irq_active():
                 # note, cpu_cycles can be zero here if the cpu is set to ignore irq
                 cpu_cycles = self.cpu.trigger_irq()
-                self.interrupt_listener.reset_irq()
-                if log_cpu:
-                    logging.log(logging.INFO, "IRQ Triggered", extra={"source": "Interrupt"})
+                if cpu_cycles > 0:
+                    # the cpu reacted to the interrupt, so clear it here so that it won't re-trigger the CPU;
+                    # if the cpu does not act on this interrupt, it will remain here (unless cleared by the caller) and
+                    # will try to trigger again on the next cycle
+                    self.interrupt_listener.reset_irq()
+                    if log_cpu:
+                        logging.log(logging.INFO, "IRQ Triggered", extra={"source": "Interrupt"})
             elif self.interrupt_listener.dma_pause:
                 # https://wiki.nesdev.com/w/index.php/PPU_OAM#DMA
                 cpu_cycles = self.cpu.dma_pause(self.interrupt_listener.dma_pause,
@@ -204,9 +205,8 @@ cdef class NES:
 
         if cpu_cycles == 0:
             cpu_cycles = self.cpu.run_next_instr()
-
-        if log_cpu:
-            logging.log(logging.INFO, self.cpu.log_line(self.ppu.line, self.ppu.pixel) , extra={"source": "CPU"})
+            if log_cpu:
+                logging.log(logging.INFO, self.cpu.log_line(self.ppu.line, self.ppu.pixel) , extra={"source": "CPU"})
 
         vblank_started = self.ppu.run_cycles(cpu_cycles * PPU_CYCLES_PER_CPU_CYCLE)
         self.apu.run_cycles(cpu_cycles)
@@ -221,7 +221,7 @@ cdef class NES:
         There is some PyGame specific stuff in here in order to handle frame timing and checking for exits
         """
         cdef int vblank_started
-        cdef float volume = 0.
+        cdef float volume = 0.5
         cdef double fps, t_start=0.
         cdef bint show_hud=True, log_cpu=False, mute=False, audio_drop=False
         cdef int frame=0, frame_start=0, cpu_cycles=0, last_sound_buffer=0
@@ -300,6 +300,9 @@ cdef class NES:
                     if event.key == pygame.K_2:
                         log_cpu = not log_cpu
 
+
+            self.screen.show()
+
             if self.sync_mode == SYNC_AUDIO:
                 # wait for the audio buffer to empty, but only if the audio is playing
                 while self.apu.buffer_remaining() > MIN_AUDIO_BUFFER_SAMPLES and player.is_active():
@@ -307,12 +310,12 @@ cdef class NES:
             elif self.sync_mode == SYNC_VSYNC or self.sync_mode == SYNC_PYGAME:
                 # here we rely on an external sync source, but allow the audio to adapt to it
                 if frame > 20:
-                    if self.apu.buffer_remaining() > last_sound_buffer and not audio_drop:
+                    if self.apu.buffer_remaining() > MIN_AUDIO_BUFFER_SAMPLES:
                         # if the rate is elevated and the sound buffer is growing, try reducing the rate
                         if self.apu.get_rate() > SAMPLE_RATE:
-                            self.apu.set_rate(self.apu.get_rate() - 240)
-                    elif (self.apu.buffer_remaining() < last_sound_buffer or audio_drop) and self.apu.get_rate() < SAMPLE_RATE + 10000:
-                        self.apu.set_rate(self.apu.get_rate() + 480)
+                            self.apu.set_rate(self.apu.get_rate() - 48)
+                    elif (self.apu.buffer_remaining() < MIN_AUDIO_BUFFER_SAMPLES) and self.apu.get_rate() < SAMPLE_RATE + 10000:
+                        self.apu.set_rate(self.apu.get_rate() + 48)
 
                     last_sound_buffer = self.apu.buffer_remaining()
             else:
@@ -323,7 +326,7 @@ cdef class NES:
                 # if we are using pygame sync, we have to supply our own clock tick here
                 clock.tick(TARGET_FPS)
 
-            if not player.is_active() and self.apu.buffer_remaining() > MIN_AUDIO_BUFFER_SAMPLES:
+            if not player.is_active() and self.apu.buffer_remaining() > MIN_AUDIO_BUFFER_SAMPLES and (frame % 10 == 0):
                 # try to (re)start the stream if it is not running if there is audio waiting
                 #print("audio dropped, attempting restart")
                 audio_drop=True
@@ -342,8 +345,15 @@ cdef class NES:
 
             #if frame % 60 == 0:
             #    self.debug_draw_nametables()
-            self.screen.show()
+
             frame += 1
+
+    cpdef void run_frame_headless(self):
+        vblank_started=False
+        while not vblank_started:
+            vblank_started = self.step(log_cpu=False)
+
+
 
     cdef void debug_draw_nametables(self):
         cdef int nx, ny, x, y
@@ -360,6 +370,8 @@ cdef class NES:
                     line += "     "
                 print(line)
             print()
-        print()
+        print("scroll {}, {}".format(self.ppu.ppu_scroll[0], self.ppu.ppu_scroll[1]))
+
+
 
 

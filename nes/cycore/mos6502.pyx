@@ -1,4 +1,6 @@
-# cython: profile=True, boundscheck=False, nonecheck=False
+# cython: profile=True, boundscheck=True, nonecheck=False, language_level=3
+import pyximport; pyximport.install()
+
 
 from .system cimport OAM_DMA, DMC_DMA, DMC_DMA_DURING_OAM_DMA
 from nes.instructions import INSTRUCTION_SET, Instruction, AddressModes
@@ -153,15 +155,11 @@ cdef class MOS6502:
         Fills in some data tables about the instructions in cdef variables; replaces the more pythonic version
         make_bytecode_dict.
         """
-
         for _, instr_set in INSTRUCTION_SET.items():
             for mode, instr in instr_set.modes.items():
                 bytecodes = instr.bytecode if type(instr.bytecode) == list else [instr.bytecode]
                 for bytecode in bytecodes:
                     self.instr_size_bytes[bytecode] = instr.size_bytes
-                    #self.instr_cycles[bytecode] = instr.cycles
-                    #self.instr_mode[bytecode] = mode
-
 
     def format_instruction(self, instr, data, caps=True):
         line = ""
@@ -279,9 +277,6 @@ cdef class MOS6502:
         else:
             return 0  # ignored!
 
-    #cpdef int run_next_instr(self):
-    #    return self._run_next_instr()
-
     cdef int run_next_instr(self):
         """
         Decode and run the next instruction at the program counter, updating the number of processor
@@ -306,12 +301,11 @@ cdef class MOS6502:
         self.cycles_since_reset += cycles
         return cycles
 
-    cdef unsigned char _status_to_byte(self, int b_flag):
+    cdef unsigned char _status_to_byte(self, bint b_flag):
         """
         Puts the status register into an 8-bit value.  Bit 6 is set high always, bit 5 (the "B flag") is set according
         to the b_flag argument.  This should be high if called from an instruction (PHP or BRK) instruction, low if
-        the call (to push the status to the stack, which is the only use of this instruction within the CPU) came from
-        a hardware interrupt (IRQ or NMI).
+        the call came from a hardware interrupt (IRQ or NMI).
         """
         return (  self.N * SR_N_MASK
                 + self.V * SR_V_MASK
@@ -444,11 +438,11 @@ cdef class MOS6502:
         extra_cycles = 0
         if condition:
             #print("jump")
-            extra_cycles = 1  # taking a branch takes at least 1 cycle
+            extra_cycles = 1  # taking a branch takes at least 1 extra cycle
             prev_pc_page = self.PC & 0xFF00  # should this be the PC before the branch instruction or after it?
             self.PC += self._from_2sc(offset_2sc)  # jumps to the address of the branch + 2 + offset (which is correct)
             if prev_pc_page != self.PC & 0xFF00:
-                # but it takes two cycles if the memory page changes
+                # but it takes two extra cycles if the memory page changes
                 extra_cycles = 2
         #else:
         #    print("no jump")
@@ -482,6 +476,7 @@ cdef class MOS6502:
         self.N = (v & SR_N_MASK) > 0
         self.V = (v & SR_V_MASK) > 0
         self.Z = (self.A & v) == 0
+        return 0
 
     cdef int _bmi(self, int offset, int _):
         """
@@ -509,24 +504,31 @@ cdef class MOS6502:
         """
         cdef int v, addr
         cdef unsigned char sr
-        # push PC + 1 to the stack, high bit first
+        # push PC (+1 if BRK) to the stack, high bit first
         v = self.PC + (1 if is_brk else 0)
         self.push_stack((v & 0xFF00) >> 8)  # high byte
-        self.push_stack(v & 0x00FF)  # low byte
+        self.push_stack(v & 0xFF)  # low byte
         # push the processor status to the stack
         # BUT note that the B flag ON THE STACK COPY ONLY is now set
         sr = self._status_to_byte(b_flag=True if is_brk else False)
         self.push_stack(sr)
-        #addr = self._from_le(self.memory.read_block(interrupt_vector, bytes=2))
         addr = self._read_word(interrupt_vector, wrap_at_page=False)
         self.PC = addr
-        if not is_brk:
-            # if this is not a brk instruction, set the interrupt disable flag
-            self.I = True
+        # Set the interrupt disable flag.  But there seems to be disagreement in the sources as to whether or not the
+        # I flag is set if this is a BRK instruction.
+        # The following sources have it set:
+        #   https://www.masswerk.at/6502/6502_instruction_set.html#BRK
+        #   blargg's instruction tests (15-brk)
+        # The following have it unaffected:
+        #   http://www.obelisk.me.uk/6502/reference.html#BRK
+        #   http://www.6502.org/tutorials/6502opcodes.html#BRK
+        #   https://www.csh.rit.edu/~moffitt/docs/6502.html#BRK
+        # Since blargg's tests run on a hardware NES, we follow that behaviour
+        self.I = True
 
     cdef int _brk(self, int _, int __):
         """
-        Force break, which simulates an interrupt request.
+        Force break, which simulates an interrupt request (IRQ).
         BRK, unlike other interrupts (IRQ and NMI), pushes PC + 1 to the stack (high byte first as usual).
         The reason for this may have been to allow brk to be dropped in in place of two byte instructions to allow
         debugging, but it is a quirk of the BRK instruction.  BRK also sets the B flag in the value of SR pushed to
@@ -1032,14 +1034,14 @@ cdef class MOS6502:
         Undocumented.
         Double NOP instruction.  Luckily it is easy to implement!
         """
-        pass
+        return 0
 
     def _top(self, _, __):
         """
         Undocumented.
         Triple NOP instruction.
         """
-        pass
+        return 0
 
     def _kil(self, _, __):
         """
@@ -1048,6 +1050,7 @@ cdef class MOS6502:
         """
         if self.undocumented_support_level >= 1:
             raise ValueError("KIL instruction.  Processor halted.")
+        return 0
 
     def _lax(self, arg, immediate):
         """
@@ -1060,6 +1063,7 @@ cdef class MOS6502:
             self.A = v
             self.X = v
             self._set_zn(self.A)
+        return 0
 
     def _aax(self, addr, _):
         """
@@ -1073,6 +1077,7 @@ cdef class MOS6502:
             if self.aax_sets_flags:
                 # the behaviour of this seems unclear, nestest does not think it does this, [13] does
                 self._set_zn(v)
+        return 0
 
     def _dcp(self, addr, _):
         """
@@ -1084,6 +1089,7 @@ cdef class MOS6502:
             v = (self.memory.read(addr) - 1) & 0xFF
             self.memory.write(addr, v)
             self._compare(self.A, v)
+        return 0
 
     def _isc(self, addr, _):
         """
@@ -1094,6 +1100,7 @@ cdef class MOS6502:
             v = (self.memory.read(addr) + 1) & 0xFF
             self.memory.write(addr, v)
             self._sbc(v, immediate=True)
+        return 0
 
     def _slo(self, addr, _):
         """
@@ -1104,6 +1111,7 @@ cdef class MOS6502:
         if self.undocumented_support_level >= 1:
             self._asl(addr, ARG_NONE)
             self._ora(self.memory.read(addr), immediate=True)
+        return 0
 
     def _rla(self, addr, _):
         """
@@ -1114,6 +1122,7 @@ cdef class MOS6502:
         if self.undocumented_support_level >= 1:
             self._rol(addr, ARG_NONE)
             self._and(self.memory.read(addr), immediate=True)
+        return 0
 
     def _rra(self, addr, _):
         """
@@ -1124,6 +1133,7 @@ cdef class MOS6502:
         if self.undocumented_support_level >= 1:
             self._ror(addr, ARG_NONE)
             self._adc(self.memory.read(addr), immediate=True)
+        return 0
 
     def _sre(self, addr, _):
         """
@@ -1134,19 +1144,36 @@ cdef class MOS6502:
         if self.undocumented_support_level >= 1:
             self._lsr(addr, ARG_NONE)
             self._eor(self.memory.read(addr), immediate=True)
+        return 0
 
     ##################### The arcane undocumented instructions (see [13] and others) ###################################
 
     def _arr(self, arg, _):
         """
-        UNTESTED
         Undocumented.  Mostly used for piracy (jk).
-        ANDs the contents of the A register with an immediate value and then RORs the result.
+        ANDs the contents of the A register with an immediate value and then RORs the result, and check bit 5 and 6:
+            If both bits are 1: set C, clear V.
+            If both bits are 0: clear C and V.
+            If only bit 5 is 1: set V, clear C.
+            If only bit 6 is 1: set C and V.
         Equivalent to AND oper, ROR A
         """
         if self.undocumented_support_level >= 2:
             self._and(arg, immediate=True)
             self._ror(ARG_NONE, ARG_NONE)
+            if ((self.A >> 5) & 1) and ((self.A >> 6) & 1):
+                self.C = True
+                self.V = False
+            elif ((self.A >> 5) & 1) == 0 and ((self.A >> 6) & 1) == 0:
+                self.C = False
+                self.V = False
+            elif ((self.A >> 5) & 1) and ((self.A >> 6) & 1) == 0:
+                self.C = False
+                self.V = True
+            elif ((self.A >> 5) & 1) == 0 and ((self.A >> 6) & 1):
+                self.C = True
+                self.V = True
+        return 0
 
     def _asr(self, arg, _):
         """
@@ -1158,18 +1185,31 @@ cdef class MOS6502:
         if self.undocumented_support_level >= 2:
             self._and(arg, immediate=True)
             self._lsr(ARG_NONE, ARG_NONE)
+        return 0
 
     def _atx(self, arg, _):
         """
-        UNTESTED
         Undocumented.
-        ORs the A register with #$EE, ANDs the result with an immediate value, and then stores the result in
-        both A and X.
-        Equivalent to ORA #$EE, AND oper, TAX
+        FAILS BLARGG'S INSTRUCTION TEST 03-immediate (both variants here)
+
+        Following http://nesdev.com/undocumented_opcodes.txt:
+            AND byte with accumulator, then transfer accumulator to X register.
+            Status flags: N,Z
+
+        Following http://www.ffd2.com/fridge/docs/6502-NMOS.extra.opcodes (where this is OAL):
+            ORs the A register with #$EE, ANDs the result with an immediate value, and then stores the result in
+            both A and X.
+            Equivalent to ORA #$EE, AND oper, TAX
+
+        The latter causes blargg's test 03-immediate to fail for opcode 0xAB
         """
         if self.undocumented_support_level >= 2:
+            #self.A &= arg
+            #self.X = self.A
+            #self._set_zn(self.A)
             self._and(arg | 0xEE, immediate=True)
             self.X = self.A
+        return 0
 
     def _aac(self, arg, _):
         """
@@ -1184,6 +1224,7 @@ cdef class MOS6502:
             self.A = self.A & arg
             self._set_zn(self.A)
             self.C = (self.A & 0b10000000) > 0
+        return 0
 
     def _axa(self, addr, _):
         """
@@ -1196,16 +1237,31 @@ cdef class MOS6502:
             hp1 = (((addr & 0xFF00) >> 8) + 1) & 0xFF
             v = (self.X & self.A) & hp1
             self.memory.write(addr, v)
+        return 0
 
-    def _axs(self, addr, _):
+    def _axs(self, arg, immediate):
         """
-        UNTESTED
+        FAILS BLARGG'S INSTRUCTION TEST 03-immediate
         Undocumented.
         AND the contents of the A and X registers (without changing the contents of either register) and
         stores the result in memory. [16]
         """
+        self.A = self.memory.read(arg) if not immediate else arg
+
         if self.undocumented_support_level >= 2:
-            self.memory.write(addr, self.A & self.X)
+
+            if immediate:
+                # AND X register with accumulator and store result in X regis-ter, then subtract byte from X register
+                # (without borrow).  Status flags: N,Z,C   (http://nesdev.com/undocumented_opcodes.txt)
+                self.X = self.A & self.X
+                t = self.X - arg
+                self.C = t >= 0
+                self.X = t & 0xFF
+                self._set_zn(self.X)
+            else:
+                self.memory.write(arg, self.A & self.X)
+                self._set_zn(self.A & self.X)
+        return 0
 
     def _lar(self, addr, _):
         """
@@ -1218,27 +1274,29 @@ cdef class MOS6502:
             self.A = v
             self.X = v
             self.SP = v
+        return 0
 
     def _sxa(self, addr, _):
         """
-        UNTESTED
+        FAILS BLARGG'S TEST 07-abs_xy
         Undocumented.
         AND X register with the high byte of the target address of the argument + 1. Store the result in memory. [16]
         """
         if self.undocumented_support_level >= 2:
             hp1 = (((addr & 0xFF00) >> 8) + 1) & 0xFF
             self.memory.write(addr, self.X & hp1)
+        return 0
 
     def _sya(self, addr, _):
         """
-        UNTESTED
+        FAILS BLARGG'S TEST 07-abs_xy
         Undocumented.
         AND Y register with the high byte of the target address of the argument + 1. Store the result in memory. [16]
         """
         if self.undocumented_support_level >= 2:
             v = self.Y & ((((addr & 0xFF00) >> 8) + 1) & 0xFF)
-            self.memory.write(addr, v)
-            self._set_zn(v)
+            self.memory.write(addr, v & 0xFF)
+        return 0
 
     def _xaa(self, arg, _):
         """
@@ -1251,6 +1309,7 @@ cdef class MOS6502:
         if self.undocumented_support_level >= 2:
             CONST = 0x00
             self.A = (self.A | CONST) & self.X & arg
+        return 0
 
     def _xas(self, addr, _):
         """
@@ -1265,13 +1324,14 @@ cdef class MOS6502:
             hp1 = (((addr & 0xFF00) >> 8) + 1) & 0xFF
             self.SP = self.A & self.X
             self.memory.write(addr, self.SP & hp1)
-
-
-
+        return 0
 
     cdef int run_instr(self, unsigned char opcode, unsigned char data[2]):
         # *********** AUTOGENERATED BY meta.py - DO NOT EDIT DIRECTLY ***********
         cdef int cycles=0, arg, immediate=False, m
+
+        #print("{:02X} {:02X} {:02X}".format(opcode, data[0], data[1]))
+
         if opcode==0x69:
             cycles = 2
             arg = data[0]

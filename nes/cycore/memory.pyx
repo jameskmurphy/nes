@@ -1,4 +1,5 @@
-# cython: profile=True, boundscheck=False, nonecheck=False
+# cython: profile=True, boundscheck=True, nonecheck=False, language_level=3
+import pyximport; pyximport.install()
 
 from .system cimport OAM_DMA
 
@@ -29,7 +30,7 @@ DEF CONTROLLER2 = 0x4017        # port for controller 2 (read only, writes to th
 DEF CART_START = 0x4020         # start of cartridge address space
 
 # OAM memory size for the DMA transfer
-from ppu cimport OAM_SIZE_BYTES, NUM_PPU_REGISTERS
+from nes.cycore.ppu cimport OAM_SIZE_BYTES, NUM_PPU_REGISTERS
 
 
 cdef class NESMappedRAM(MemoryBase):
@@ -105,6 +106,7 @@ cdef class NESMappedRAM(MemoryBase):
             else:
                 # this is a write of an apu register; pass it on to the apu
                 #print("apu cycles at write below:", self.apu.cycles)
+                #print("apu write: {:02X} -> {:04X}".format(value, address))
                 self.apu.write_register(address, value)
         elif address < APU_UNUSED_END:
             # todo: generally unused APU and I/O functionality
@@ -165,12 +167,9 @@ cdef class NESVRAM(MemoryBase):
     References:
         [1] PPU memory map: https://wiki.nesdev.com/w/index.php/PPU_memory_map
     """
-    def __init__(self, cart, nametable_size_bytes=2048):
+    def __init__(self, cart):
         super().__init__()
         self.cart = cart
-        if nametable_size_bytes != NAMETABLES_SIZE_BYTES:
-            # There are a few carts that can provide extra nametable space, but that is not yet supported
-            raise ValueError("Different sized nametables not implemented")
 
     cdef unsigned char read(self, int address):
         cdef unsigned char value
@@ -181,7 +180,7 @@ cdef class NESVRAM(MemoryBase):
             value = self.cart.read_ppu(address)
         elif address < PALETTE_START:
             # nametable
-            page = (address - NAMETABLE_START) / NAMETABLE_LENGTH_BYTES # which nametable?
+            page = int((address - NAMETABLE_START) / NAMETABLE_LENGTH_BYTES)    # which nametable?
             offset = (address - NAMETABLE_START) % NAMETABLE_LENGTH_BYTES  # offset in that table
 
             # some of the pages (e.g. 2 and 3) are mirrored, so for these, find the underlying

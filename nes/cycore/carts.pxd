@@ -1,6 +1,8 @@
 """
 Cython declarations for the NES cartridges
 """
+from .system cimport InterruptListener   # used by MMC3 to generate IRQs
+
 
 cdef enum:
     BYTES_PER_KB = 1024
@@ -22,6 +24,8 @@ cdef class NESCart:
     cdef void write(self, int address, unsigned char value)
     cdef unsigned char read_ppu(self, int address)
     cdef void write_ppu(self, int address, unsigned char value)
+
+    cdef void irq_tick(self)
 
 
 ### Mapper 0 (aka NROM) ################################################################################################
@@ -147,3 +151,52 @@ cdef class NESCart2(NESCart0):
     cdef void write(self, int address, unsigned char value)
 
 
+### Mapper 4 (aka MMC3) ########################################################################################
+# ref: https://wiki.nesdev.com/w/index.php/MMC3
+
+cdef enum:
+    M4_PRG_RAM_SIZE = 8 * BYTES_PER_KB
+    M4_PRG_ROM_BANK_SIZE = 8 * BYTES_PER_KB
+    M4_CHR_ROM_BANK_SIZE = 1 * BYTES_PER_KB
+
+    M4_MAX_PRG_BANKS = 64
+    M4_MAX_CHR_BANKS = 256
+
+    # Main memory map
+    M4_PRG_RAM_START = 0x6000
+    M4_PRG_ROM_START = 0x8000
+
+    # Registers
+    # All these register ranges have two purposes, depending on whether it is an even or odd address
+    BANK_REG_START = 0x8000              # even -> bank select, odd -> bank data
+    MIRROR_PROTECT_REG_START = 0xA000    # even -> mirroring, odd -> ram protect
+    IRQ_LATCH_RELOAD_REG_START = 0xC000  # even -> irq latch, odd -> irq reload
+    IRQ_ACTIVATE_START = 0xE000          # even -> irq disable, odd -> irq enable
+
+
+cdef class NESCart4(NESCart):
+    cdef InterruptListener interrupt_listener
+    cdef int num_prg_banks, num_chr_banks       # number of available memory banks in this cart
+    cdef bint chr_mem_writeable                 # whether or not CHR memory is writeable (i.e. RAM)
+    cdef unsigned char bank_register[8]         # bank registers (both chr and prg)
+
+    cdef bint chr_a12_inversion, prg_bank_mode  # mode selectors that determine how bank switching works
+    cdef unsigned char bank_select              # determines which bank register to update on next write to bank_data
+    cdef bint prg_ram_enable, prg_ram_protect   # prg ram protection flags
+    cdef bint mirror_pattern_fixed              # whether the mirror pattern is hard-wired or can be adjusted
+
+    cdef unsigned char irq_reload_value         # the value loaded into the irq latch on reload
+    cdef bint irq_reload                        # reload irq counter to reload value at next tick
+    cdef bint irq_enabled                       # irq enabled or not?
+    cdef int irq_counter                        # counter used to count down to IRQ trigger
+
+    cdef unsigned char banked_prg_rom[M4_MAX_PRG_BANKS][M4_PRG_ROM_BANK_SIZE]
+    cdef unsigned char banked_chr_rom[M4_MAX_CHR_BANKS][M4_CHR_ROM_BANK_SIZE]
+    cdef unsigned char ram[M4_PRG_RAM_SIZE]
+
+    cdef unsigned char read(self, int address)
+    cdef void write(self, int address, unsigned char value)
+    cdef unsigned int _get_ppu_bank(self, int address)
+    cdef unsigned char read_ppu(self, int address)
+    cdef void write_ppu(self, int address, unsigned char value)
+    cdef void irq_tick(self)

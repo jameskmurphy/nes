@@ -1,12 +1,9 @@
-# cython: profile=True, boundscheck=False, nonecheck=False
-
+# cython: profile=True, boundscheck=True, nonecheck=False, language_level=3
 import pyximport; pyximport.install()
-
-from .memory cimport NESVRAM
 
 # important to cimport these rather than import them because that makes them have a lot less python interaction
 from .bitwise cimport bit_high, bit_low, set_bit, clear_bit, set_high_byte, set_low_byte
-from memory cimport PALETTE_START, NAMETABLE_START, NAMETABLE_LENGTH_BYTES, ATTRIBUTE_TABLE_OFFSET
+from .memory cimport NESVRAM, PALETTE_START, NAMETABLE_START, NAMETABLE_LENGTH_BYTES, ATTRIBUTE_TABLE_OFFSET
 
 # A NES rgb palette mapping from NES color values to RGB; others are possible.
 cdef int[64][3] DEFAULT_NES_PALETTE = [
@@ -60,7 +57,6 @@ cdef class NESPPU:
         self._io_latch = 0              # last write/valid read of the ppu registers, sometimes reflected in read status
 
         # internal latches used in background rendering
-        #self._palette = [DEFAULT_NES_PALETTE[0:3], DEFAULT_NES_PALETTE[3:6]]     # 2 x palette latches
         self._palette = [[0, 1, 2, 3], [4, 5, 6, 7]]
         self._pattern_lo = 0   # 16 bit patterns register to hold 2 x 8 bit patterns
         self._pattern_hi = 0   # 16 bit patterns register to hold 2 x 8 bit patterns
@@ -96,6 +92,7 @@ cdef class NESPPU:
         self.transparent_color = -1
 
         self._palette_cache_valid[:] = [0, 0, 0, 0, 0, 0, 0, 0]
+        self.irq_tick_triggers[:] = [False] * 68
 
     def set_hex_palette(self):
         for i, c in enumerate(self.rgb_palette):
@@ -197,7 +194,7 @@ cdef class NESPPU:
         """
         # need to store the last write because it affects the value read on ppu_status
         # "Writing any value to any PPU port, even to the nominally read-only PPUSTATUS, will fill this latch"  [6]
-        cdef int trigger_nmi, n_chng
+        cdef int trigger_nmi, n_chng, prev_ppu_addr
         value &= 0xFF  # can only write a byte here
         self._io_latch = value
 
@@ -242,6 +239,7 @@ cdef class NESPPU:
             # write only
             # high byte first
             if self._ppu_byte_latch == 0:
+                prev_ppu_addr = self.ppu_addr
                 self.ppu_addr = (self.ppu_addr & 0x00FF) + (value << 8)
                 # Writes here overwrite the current nametable bits in ppu_ctrl (or at least overwrite bits in an
                 # internal latch that is equivalent to this); see [7].  Some games, e.g. SMB, rely on this behaviour
@@ -250,7 +248,10 @@ cdef class NESPPU:
                 # a write here also has a very unusual effect on the coarse and fine y scroll [7]
                 self.ppu_scroll[PPU_SCROLL_Y] = (self.ppu_scroll[PPU_SCROLL_Y] & 0b00111100) + \
                                                      ((value & 0b00000011) << 6) + ((value & 0b00110000) >> 4)
+                if bit_low(prev_ppu_addr, 12) and bit_high(self.ppu_addr, 12):
+                    self.vram.cart.irq_tick()
             else:
+
                 self.ppu_addr = (self.ppu_addr & 0xFF00) + value
                 # writes here have a weird effect on the x and y scroll values [7]
                 self.ppu_scroll[PPU_SCROLL_X] = (self.ppu_scroll[PPU_SCROLL_X] & 0b00000111) + ((value & 0b00011111) << 3)
@@ -275,17 +276,25 @@ cdef class NESPPU:
 
     ################ Screen buffer copy and clear ######################################################################
 
+    cdef int get_background_color(self):
+        """
+        Get the background color for the screen (set by color zero of palette zero)
+        :return:
+        """
+        cdef int p0[4]
+        self.decode_palette(p0, 0, False)
+        return self.hex_palette[p0[0]]
+        #return (self.rgb_palette[p0[0]][0] << 16) + (self.rgb_palette[p0[0]][1] << 8) + self.rgb_palette[p0[0]][2]
+        #self.bkg_color = cc
+
     cdef void _clear_to_bkg(self):
         """
         Clears the screen buffer to the background color (which is set by palette 0)
         :return:
         """
         cdef int cc, x, y
-        cdef int p0[4]
-        self.decode_palette(p0, 0, False)
-        cc = (self.rgb_palette[p0[0]][0] << 16) + (self.rgb_palette[p0[0]][1] << 8) + self.rgb_palette[p0[0]][2]
-        self.bkg_color = cc
 
+        cc = self.get_background_color()
         for x in range(SCREEN_WIDTH_PX):
             for y in range(SCREEN_HEIGHT_PX):
                 self.screen_buffer[x][y] = cc
@@ -354,6 +363,11 @@ cdef class NESPPU:
             self._num_active_sprites = 0
             # reset the x counter to the start of the line
             self._effective_x = self.ppu_scroll[PPU_SCROLL_X] + (bit_high(self.ppu_ctrl, BIT_NAMETABLE_X) << 8)
+        elif self.pixel == 260 and (self.ppu_mask & RENDERING_ENABLED_MASK) > 0:
+            # for simplicity, always trigger the irq_tick once at pixel 260 on the pre-render scanline; this might be
+            # wrong by a few pixels for this line, but it probably won't matter most of the time
+            # todo: more correct behaviour here (what is it in the case of double-height sprites?)
+            self.vram.cart.irq_tick()
         elif self.pixel == 280:
             # "Vertical scroll bits are reloaded if rendering is enabled"
             self._reset_effective_y()
@@ -366,9 +380,9 @@ cdef class NESPPU:
 
     cdef void render_visible_scanline(self):
         """
-        Render a pixel on a visible scanline
+        Render a pixel on a visible scanline (lines 0-239 inclusive)
         """
-        cdef int bkg_pixel, final_pixel, coarse_y
+        cdef int bkg_pixel, final_pixel, coarse_y, cmask, double_sprites, sprite_table
 
         if 0 < self.pixel <= 256:  # pixels 1 - 256
             # render pixel - 1
@@ -380,8 +394,10 @@ cdef class NESPPU:
             bkg_pixel = self._get_bkg_pixel()
             # overlay sprite from latches
             final_pixel = self._overlay_sprites(bkg_pixel)
+            # monochrome mode if bit 0 of ppu_mask is set
+            cmask = 0x30 if (self.ppu_mask & 1) else 0xFF
             if final_pixel != self.transparent_color:
-                self.screen_buffer[self.pixel - 1][self.line] = self.hex_palette[final_pixel]
+                self.screen_buffer[self.pixel - 1][self.line] = self.hex_palette[final_pixel & cmask]
         elif self.pixel == 257:   # pixels 257 - 320
             # sprite data fetching: fetch data from OAM for sprites on the next scanline
             # NOTE:  "evaluation applies to the next line's sprite rendering, ... and this is why
@@ -395,14 +411,22 @@ cdef class NESPPU:
             self._effective_y += 1
             if (self._effective_y & 0xFF) == 240:  # can only go up to 239 before wrapping to 256
                 self._effective_y += 16  # skip over the attribute table to the next nametable (equivalent to 2 rows)
-
-            #print(self.line, self._effective_y, (self._effective_y & 0b11111000)>>3, self._effective_y & 0xFF, self._effective_y & (1<<8))
         elif self.pixel == 328 or self.pixel == 336:   # pixels 321 - 336
             # fill background data latches with data for first two tiles of next scanline
             self.fill_bkg_latches()  # get some more data for the upper latches
         else:  # pixels 337 - 340
             # todo: garbage nametable fetches (used by MMC5)
             pass
+
+        if 257 <= self.pixel <= 324:  # sprite fetching period
+            # sprite fetch has already happened on pixel 257 (above), but it is possible that, if using double sprites
+            # irq ticks could be triggered here; the timings of these were precalculated during sprite fetch and put
+            # into the irq_tick_triggers array, so all we have to do here is test if this pixel has the trigger be true
+            if self.irq_tick_triggers[self.pixel - 257]:
+                self.vram.cart.irq_tick()
+
+        #if self.pixel == 0:
+        #    print("line {}".format(self.line))
 
     cdef void increment_pixel(self):
         """
@@ -426,7 +450,11 @@ cdef class NESPPU:
         """
         Increment vram address after reads/writes by an amount specified by a value in ppu_ctrl
         """
+        cdef int prev_ppu_addr = self.ppu_addr
         self.ppu_addr += 1 if (self.ppu_ctrl & VRAM_INCREMENT_MASK) == 0 else 32
+        if bit_low(prev_ppu_addr, 12) and bit_high(self.ppu_addr, 12):
+            # if line A12 changes from low to high, trigger an irq counter tick in the cartridge (MMC3 and derivatives)
+            self.vram.cart.irq_tick()
 
     cdef void _trigger_nmi(self):
         """
@@ -481,10 +509,23 @@ cdef class NESPPU:
         """
         Non cycle-correct way to pre-fetch the sprite lines for the next scanline
         """
-        cdef int table_base, palette_ix, attribs, flip_v, flip_h, tile_ix, line, tile_base, x, c
+        cdef int table_base, prev_table_base, palette_ix, attribs, flip_v, flip_h, tile_ix, line, tile_base, x, c
         cdef int palette[4]
         cdef unsigned char sprite_pattern_lo, sprite_pattern_hi
         cdef int i, address
+
+        # previously the ppu was fetching background tiles, so address line A12 was set by the bkg table base; this is
+        # used for triggering irq ticks for MMC3 type cartridges.
+        table_base = ((self.ppu_ctrl & BKG_PATTERN_TABLE_MASK) > 0) * 0x1000
+
+        # the IRQ tick triggers for MMC3 are handled on the scanline renderers themselves, but they are related to
+        # the rendering of sprites and associated pattern table switching, so they are calculated here
+        self.irq_tick_triggers[:] = [False] * 68
+        if not double_sprites:
+            if table_base == 0:
+                self.irq_tick_triggers[67] = True   # trigger once at pixel 324
+            else:
+                self.irq_tick_triggers[3] = True    # trigger once at pixel 260
 
         for i in range(self._num_active_sprites):
             address = self._active_sprite_addrs[i]
@@ -506,7 +547,12 @@ cdef class NESPPU:
                 line = self._sprite_line[i] if not flip_v else 15 - self._sprite_line[i]
                 tile_ix = self.oam[(address + 1) & 0xFF] & 0b11111110
                 # in double-height mode, sprite table is set by bottom bit of 2nd byte in OAM
+                prev_table_base = table_base
                 table_base = (self.oam[(address + 1) & 0xFF] & 1) * 0x1000
+                if prev_table_base==0 and table_base > 0:
+                    # rising edge on the table selecting address line triggers the irq_counter
+                    self.irq_tick_triggers[i * 8] = True
+
                 if line >= 8:
                     # in the lower tile
                     tile_ix += 1
@@ -519,6 +565,13 @@ cdef class NESPPU:
             for x in range(8):
                 c = bit_high(sprite_pattern_hi, x) * 2 + bit_high(sprite_pattern_lo, x)
                 self._sprite_pattern[i][x if flip_h else 7 - x] = palette[c] if c else self.transparent_color
+
+        if double_sprites and self._num_active_sprites < 8:
+            # at this point, the PPU does some reads from table 1 that are discarded, but that means that if the table
+            # base was zero, it will then go high, triggering an irq tick
+            if table_base == 0:
+                self.irq_tick_triggers[self._num_active_sprites * 8] = True
+
 
     cdef int _overlay_sprites(self, int bkg_pixel):
         """
@@ -640,7 +693,7 @@ cdef class NESPPU:
         px = (self.pixel - 1) % 8 + fine_x
         mask = 1 << (15 - px)
         v = ((self._pattern_lo & mask) > 0) + ((self._pattern_hi & mask) > 0) * 2
-        return self._palette[px / 8][v] if v > 0 else self.transparent_color
+        return self._palette[px >> 3][v] if v > 0 else self.transparent_color
 
 
     ################ Palette Decoder ###################################################################################
@@ -659,7 +712,7 @@ cdef class NESPPU:
         If is_sprite is true, then decodes palette from the sprite palettes, otherwise
         decodes from the background palette tables.
         """
-        cdef int palette_address, i
+        cdef int palette_address, i, cmask
 
         if self._palette_cache_valid[is_sprite * 4 + palette_id]:
             palette_out[0] = self._palette_cache[is_sprite * 4 + palette_id][0]
@@ -672,7 +725,7 @@ cdef class NESPPU:
         # each of which consists of three colors, each of which is represented by a singe byte
         palette_address = PALETTE_START + 16 * is_sprite + 4 * palette_id
         for i in range(4):
-            palette_out[i] = self.vram.read(palette_address + i) & 0b00111111
+            palette_out[i] = (self.vram.read(palette_address + i) & 0b00111111)
             self._palette_cache[is_sprite * 4 + palette_id][i] = palette_out[i]
         self._palette_cache_valid[is_sprite * 4 + palette_id] = True
 
@@ -694,4 +747,111 @@ cdef class NESPPU:
                                                    self.ppu_scroll[1],
                                                    self.ppu_addr)
         return log
+
+    ################ Debug #############################################################################################
+
+    cpdef void debug_render_nametables(self, unsigned int[:, :] dest):
+        """
+        Reads the nametable and attribute table and then sends the result of that for each
+        tile on the screen to render_tile to actually render the tile (reading the pattern tables, etc.)
+        """
+        cdef int nx, ny, nametable, addr_base, row, vblock, v_subblock_ix, col, tile_index, hblock, h_subblock_ix, shift
+        cdef int mask, palette_id, tile_bank, x, y, x0, xe, y0, ye
+        cdef unsigned char attribute_byte
+
+        dest[:, :] = self.get_background_color()
+
+        for ny in range(2):
+            for nx in range(2):
+                nametable = ny * 2 + nx
+                addr_base = NAMETABLE_START + nametable * NAMETABLE_LENGTH_BYTES
+                for row in range(SCREEN_TILE_ROWS):
+                    vblock = int(row / 2)
+                    v_subblock_ix = vblock % 2
+                    for col in range(SCREEN_TILE_COLS):
+                        tile_index = self.vram.read(addr_base + row * SCREEN_TILE_COLS + col)
+
+                        # get attribute byte from the attribute table at the end of the nametable
+                        # these tables compress the palette id into two bits for each 2x2 tile block of 16x16px.
+                        # the attribute bytes each contain the palette id for a 2x2 block of these 16x16 blocks
+                        # so get the correct byte and then extract the actual palette id from that
+                        hblock = int(col / 2)
+                        attribute_byte = self.vram.read(addr_base
+                                                        + ATTRIBUTE_TABLE_OFFSET
+                                                        + (int(vblock / 2) * 8 + int(hblock / 2))
+                                                       )
+                        h_subblock_ix = hblock % 2
+                        shift = 4 * v_subblock_ix + 2 * h_subblock_ix
+                        mask = 0b00000011 << shift
+                        palette_id = (attribute_byte & mask) >> shift
+                        # ppu_ctrl tells us whether to read the left or right pattern table, so let's fetch that
+                        tile_bank = (self.ppu_ctrl & BKG_PATTERN_TABLE_MASK) > 0
+                        tile = self.debug_render_tile(dest,
+                                                      (nx * SCREEN_TILE_COLS + col) * TILE_WIDTH_PX,
+                                                      (ny * SCREEN_TILE_ROWS + row) * TILE_HEIGHT_PX,
+                                                      tile_index,
+                                                      tile_bank,
+                                                      -1,
+                                                      #palette_id,
+                                                      False,
+                                                      False
+                                                     )
+        # draw a box around the active window
+        x0 = (self.ppu_scroll[PPU_SCROLL_X] + (bit_high(self.ppu_ctrl, BIT_NAMETABLE_X) << 8)) % 512
+        y0 = (self.ppu_scroll[PPU_SCROLL_Y] + (bit_high(self.ppu_ctrl, BIT_NAMETABLE_Y) * 240)) % 480
+
+        xe = (x0 + 256) % 512
+        ye = (y0 + 240) % 480
+
+        dest[x0:min(512, x0 + 256), y0] = 255 << 8
+        dest[x0:min(512, x0 + 256), ye] = 255 << 8
+        if x0 + 256 > 512:
+            dest[0:xe, y0] = 255 << 8
+            dest[0:xe, ye] = 255 << 8
+
+        dest[x0, y0:min(480, y0 + 240)] = 255 << 8
+        dest[xe, y0:min(480, y0 + 240)] = 255 << 8
+        if y0 + 240 > 480:
+            dest[x0, 0:ye] = 255 << 8
+            dest[xe, 0:ye] = 255 << 8
+
+
+    cpdef void debug_render_tile(self, unsigned int[:, :] dest, int x0, int y0, int tile_index, int tile_bank, int palette_id, bint flip_h, bint flip_v):
+        """
+        Decodes a tile given by tile_index from the pattern table specified by tile_bank to an array of RGB color value,
+        using the palette supplied.  Transparent pixels (value 0 in the tile) are replaced with self.transparent_color.
+        This makes them ready to be blitted to the screen.
+        """
+        cdef int x, y, xx, yy, pixel_color_ix, plane, table_base, tile_base
+        cdef int palette[4]
+
+        if palette_id > 0:
+            self.decode_palette(palette, palette_id, is_sprite=False)
+        else:
+            palette[0] = 0x01
+            palette[1] = 0x11
+            palette[2] = 0x21
+            palette[3] = 0x31
+
+        # now decode the tile
+        table_base = tile_bank * 0x1000
+
+        # tile index tells us which pattern table to read
+        tile_base = table_base + tile_index * PATTERN_SIZE_BYTES
+
+        # the (palettized) tile is stored as 2x8byte bit planes, each representing an 8x8 bitmap of depth 1 bit
+        # tile here is indexed tile[row][column], *not* tile[x][y]
+        #tile = [[0] * TILE_WIDTH_PX for _ in range(TILE_HEIGHT_PX)]
+
+        for y in range(TILE_HEIGHT_PX):
+            for x in range(TILE_WIDTH_PX):
+                xx = x if not flip_h else TILE_WIDTH_PX - 1 - x
+                yy = y if not flip_v else TILE_HEIGHT_PX - 1 - y
+                pixel_color_ix = 0
+                for plane in range(2):
+                    pixel_color_ix += ((self.vram.read(tile_base + plane * 8 + y) & (0x1 << (7 - x))) > 0) * (plane + 1)
+
+                if pixel_color_ix > 0:
+                    dest[x0 + xx, y0 + yy] = self.hex_palette[palette[pixel_color_ix]]
+
 

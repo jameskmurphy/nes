@@ -65,6 +65,7 @@ cdef class APUUnit:
 
     cdef void update_length_ctr(self)
     cdef void set_enable(self, bint value)
+    cdef void set_length_ctr(self, int value)
 
 
 cdef class APUTriangle(APUUnit):
@@ -73,6 +74,7 @@ cdef class APUTriangle(APUUnit):
         int linear_reload_value, period, linear_ctr
         double phase
 
+    cdef void write_register(self, int address, unsigned char value)
     cdef void quarter_frame(self)
     cdef void half_frame(self)
     cdef int generate_sample(self)
@@ -81,7 +83,7 @@ cdef class APUTriangle(APUUnit):
 cdef class APUPulse(APUUnit):
     cdef:
         bint constant_volume, is_unit_1
-        unsigned int period, duty
+        int period, adjusted_period, duty
         double phase
         APUEnvelope env
         bint sweep_enable, sweep_negate, sweep_reload
@@ -89,6 +91,7 @@ cdef class APUPulse(APUUnit):
 
         int duty_waveform[4][8]  # duty cycle sequences
 
+    cdef void write_register(self, int address, unsigned char value)
     cdef void sweep_update(self)
     cdef void quarter_frame(self)
     cdef void half_frame(self)
@@ -98,12 +101,13 @@ cdef class APUPulse(APUUnit):
 cdef class APUNoise(APUUnit):
     cdef:
         bint constant_volume, mode
-        unsigned int period, feedback, timer
+        int period, feedback, timer
         #double shift_ctr
         APUEnvelope env
 
         unsigned int timer_table[16]    # noise timer periods
 
+    cdef void write_register(self, int address, unsigned char value)
     cdef void update_cycles(self, int cycles)
     cdef void quarter_frame(self)
     cdef void half_frame(self)
@@ -166,9 +170,6 @@ cdef class NESAPU:
         APUNoise noise
         APUDMC dmc
 
-        #### lookup tables
-        unsigned int length_table[32]   # timer length lookup
-
         #### Frame counters
         int frame_counter
 
@@ -177,11 +178,7 @@ cdef class NESAPU:
     # register control functions
     cdef unsigned char read_register(self, int address)
     cdef void write_register(self, int address, unsigned char value)
-
     cdef void _set_status(self, unsigned char value)
-    cdef void _set_pulse(self, int address, unsigned char value)
-    cdef void _set_triangle(self, int address, unsigned char value)
-    cdef void _set_noise(self, int address, unsigned char value)
 
     # synchronous update functions
     cdef int run_cycles(self, int cpu_cycles)

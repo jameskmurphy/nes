@@ -1,7 +1,15 @@
+# cython: profile=True, boundscheck=True, nonecheck=False, language_level=3
+import pyximport; pyximport.install()
+
 from .bitwise cimport bit_high
 import pyaudio
 
 from .system cimport DMC_DMA
+
+#### Length Table and other constant arrays ############################################################################
+
+cdef int[32] LENGTH_TABLE = [ 10, 254, 20,  2, 40,  4, 80,  6, 160,  8, 60, 10, 14, 12, 26, 14,
+                              12,  16, 24, 18, 48, 20, 96, 22, 192, 24, 72, 26, 16, 28, 32, 30 ]
 
 #### Basic components ##################################################################################################
 
@@ -24,6 +32,10 @@ cdef class APUUnit:
         self.enable = value
         if not self.enable:
             self.length_ctr = 0
+
+    cdef void set_length_ctr(self, int value):
+        if self.enable:
+            self.length_ctr = LENGTH_TABLE[value & 0b11111]
 
 
 cdef class APUEnvelope:
@@ -72,7 +84,6 @@ cdef class APUTriangle(APUUnit):
     Reference:
         [4] triangle:  https://wiki.nesdev.com/w/index.php/APU_Triangle
     """
-
     def __init__(self):
         super().__init__()
         self.period = 0
@@ -81,6 +92,21 @@ cdef class APUTriangle(APUUnit):
         self.linear_reload_flag = False
         self.linear_reload_value = 0
         self.linear_ctr = 0
+
+    cdef void write_register(self, int address, unsigned char value):
+        """
+        Set properties of the triangle waveform generator from a write to its registers.
+        """
+        if address == 0x4008:
+            self.ctr_halt = bit_high(value, 7)
+            # don't set the counter directly, just set the reload value for now
+            self.linear_reload_value = value & 0b01111111
+        elif address == 0x400A:
+            self.period = (self.period & 0xFF00) + value
+        elif address == 0x400B:
+            self.period = (self.period & 0xFF) + ((value & 0b00000111) << 8)
+            self.set_length_ctr(value >> 3)
+            self.linear_reload_flag = True
 
     cdef void quarter_frame(self):
 
@@ -110,7 +136,7 @@ cdef class APUTriangle(APUUnit):
         cdef int v
 
         # frequency of the triangle wave is given by timer as follows [4]:
-        freq_hz = CPU_FREQ_HZ * 1. / (32. * (self.period + 1.))
+        freq_hz = CPU_FREQ_HZ * 1. / (32. * (self.period + 1))
 
         # how much phase we step with each cycle is given by
         #   phase_per_samp = cycles per sample = (freq_hz / samples per second)
@@ -134,6 +160,8 @@ cdef class APUPulse(APUUnit):
     APU pulse unit; there are two of these in the APU
     Reference:
         [5] pulse: https://wiki.nesdev.com/w/index.php/APU_Pulse
+        [12] http://nesdev.com/apu_ref.txt
+        [13] https://wiki.nesdev.com/w/index.php/APU_Sweep
     """
     # Duty cycles for the pulse generators [5]
     DUTY_CYCLES = [[0, 1, 0, 0,  0, 0, 0, 0],
@@ -145,6 +173,7 @@ cdef class APUPulse(APUUnit):
         super().__init__()
         self.constant_volume = False
         self.period = 1
+        self.adjusted_period = 1   # period adjusted by the sweep units
         self.duty = 0
         self.phase = 0
         self.env = APUEnvelope()
@@ -163,6 +192,39 @@ cdef class APUPulse(APUUnit):
             for j in range(8):
                 self.duty_waveform[i][j] = self.DUTY_CYCLES[i][j]
 
+    cdef void write_register(self, int address, unsigned char value):
+        """
+        Set properties of the pulse waveform generators from a write to one of their registers; assumes address has been
+        mapped to the 0x4000-0x4003 range (i.e. if this is pulse 1, subtract 4)
+        """
+        address -= 4 if not self.is_unit_1 else 0
+        if address == 0x4000:
+            self.duty = (value & 0b11000000) >> 6
+            self.ctr_halt = bit_high(value, 5)         # } these are the same
+            self.env.loop_flag = bit_high(value, 5)    # }
+            self.constant_volume = bit_high(value, 4)
+            self.env.volume = value & 0b00001111
+        elif address == 0x4001:
+            self.sweep_enable = bit_high(value, 7)
+            self.sweep_period = ((value & 0b01110000) >> 4) + 1
+            self.sweep_negate = bit_high(value, 3)
+            self.sweep_shift = value & 0b00000111
+            self.sweep_reload = True
+            #print("sweep: {:08b}".format(value))
+        elif address == 0x4002:
+            # timer low
+            self.period = (self.period & 0xFF00) + value
+            self.adjusted_period = self.period
+        elif address == 0x4003:
+            self.period = (self.period & 0xFF) + ((value & 0b00000111) << 8)
+            self.adjusted_period = self.period
+            self.set_length_ctr(value >> 3)
+            # side effect: the sequencer is restarted at the first value of the sequence and envelope is restarted [5]
+            self.phase = 0
+            # side effect: restart envelope and set the envelope start flag
+            self.env.restart()
+            self.env.start_flag = True
+
     cdef void quarter_frame(self):
         self.env.update()
 
@@ -171,25 +233,58 @@ cdef class APUPulse(APUUnit):
         self.update_length_ctr()
 
     cdef void sweep_update(self):
+        """
+        Adjust the period based on the sweep unit.  Part of the functionality here is based on the following paragraph
+        from [12]:
+            "When the channel's period is less than 8 or the result of the shifter is
+             greater than $7FF, the channel's DAC receives 0 and the sweep unit doesn't
+             change the channel's period. Otherwise, if the sweep unit is enabled and the
+             shift count is greater than 0, when the divider outputs a clock, the channel's
+             period in the third and fourth registers are updated with the result of the
+             shifter."
+        This seems to disagree a little with [13] in that the description in [13] permits zero as a shift
+        value (and even uses it as an example), whereas the above text excludes it.  This makes a difference in the
+        game Ghengis Khan, which if 0 is permitted as a shift has background music which sounds wrong (and differs from
+        FCEUX) in the main game screens.
+
+        In the system here, adjusted_period is used to determine whether or not the period has been changed outside of
+        the permitted range, silencing the channel (without adjusting period outside that range).  Don't know if this is
+        correct, but it seems to be what is implied in [12].
+
+        Finally, should the change amount be based on the non-adjusted period or the adjusted period?  I.e. should the
+        period be irrevocably altered by the sweep unit, or is the original period retained somewhere and used to
+        calculate the shift each time?  In a recurring multiple shift, this changes the frequency change rate from
+        exponential to linear.  No clear idea of what is correct.
+        """
         cdef int change_amount
-        if self.sweep_divider == 0 or self.sweep_reload:
-            # If the divider's counter is zero or the reload flag is true, the counter is set to P and the reload flag
+        if self.sweep_reload:
+            # If [the divider's counter is zero or] the reload flag is true, the counter is set to P and the reload flag
             # is cleared. [7]
             self.sweep_divider = self.sweep_period
             self.sweep_reload = False
-        else:
+            return
+
+        if self.sweep_divider > 0:
             # Otherwise, the counter is decremented. [7]
             self.sweep_divider -= 1
+        else: # self.sweep_divider == 0:
+            # If the divider's counter is zero [...], the counter is set to P and the reload flag is cleared. [7]
+            self.sweep_divider = self.sweep_period
+            self.sweep_reload = False
 
-        if self.sweep_divider == 0 and self.sweep_enable:
-            # happens if sweep was 1 coming into this function, and has now been decremented to zero
-            # in this case, trigger a period adjustment
-            change_amount = self.period >> self.sweep_shift
-            if self.sweep_negate:
-                change_amount = -change_amount
-                if self.is_unit_1 == 0:
-                    change_amount -= 1
-            self.period += change_amount
+            if self.sweep_enable and self.sweep_shift > 0:
+                # in this case, trigger a period adjustment
+                change_amount = self.period >> self.sweep_shift
+                if self.sweep_negate:
+                    change_amount = -change_amount
+                    if not self.is_unit_1:
+                        change_amount -= 1
+
+                # check if the adjusted period would go outside range; if so, don't update main period, but channel
+                # will be silenced (see description above)
+                self.adjusted_period = self.period + change_amount
+                if 8 < self.adjusted_period <= 0x7FF:
+                    self.period += change_amount
 
     cdef int generate_sample(self):
         """
@@ -198,7 +293,7 @@ cdef class APUPulse(APUUnit):
         cdef double freq_hz
         cdef int v, volume, change_amount
 
-        freq_hz = CPU_FREQ_HZ * 1. / (16. * (self.period + 1.))
+        freq_hz = CPU_FREQ_HZ * 1. / (16. * (self.period + 1))
 
         # how much phase we step with each cycle is given by
         #   phase_per_samp = cycles per sample = (freq_hz / samples per second)
@@ -206,10 +301,10 @@ cdef class APUPulse(APUUnit):
         phase_per_samp = freq_hz / SAMPLE_RATE
 
         # there are several conditions under which the channel is muted.  [7] and others.
-        if (    (not self.enable)
+        if ( not self.enable
              or self.length_ctr == 0
-             or self.period < 8
-             or self.period > 0x7FF
+             or self.adjusted_period < 8
+             or self.adjusted_period > 0x7FF
             ):
             v = 0
         else:
@@ -238,6 +333,24 @@ cdef class APUNoise(APUUnit):
         self.env = APUEnvelope()
         for i in range(16):
             self.timer_table[i] = self.TIMER_TABLE[i]
+
+    cdef void write_register(self, int address, unsigned char value):
+        """
+        Set properties of the noise waveform generators from a write to its registers.
+        """
+        if address == 0x400C:
+            self.ctr_halt = bit_high(value, 5)    # } these are the same
+            self.env.loop_flag = bit_high(value, 5)     # }
+            self.constant_volume = bit_high(value, 4)
+            self.env.volume = value & 0b00001111
+        elif address == 0x400E:
+            self.mode = bit_high(value, 7)
+            self.period = self.timer_table[value & 0b00001111]
+        elif address == 0x400F:
+            self.set_length_ctr(value >> 3)
+            # side effect: restart envelope and set the envelope start flag
+            self.env.restart()
+            self.env.start_flag = True
 
     cdef void quarter_frame(self):
         self.env.update()
@@ -402,12 +515,6 @@ cdef class NESAPU:
 
         [10] DMC interrupt flag reset: http://www.slack.net/~ant/nes-emu/apu_ref.txt
     """
-
-    # length table is a lookup from the value written to the length counter and the value
-    # loaded into the length counter [3]
-    LENGTH_TABLE = [ 10, 254, 20,  2, 40,  4, 80,  6, 160,  8, 60, 10, 14, 12, 26, 14,
-                     12,  16, 24, 18, 48, 20, 96, 22, 192, 24, 72, 26, 16, 28, 32, 30 ]
-
     def __init__(self, interrupt_listener, master_volume=0.5):
         self.interrupt_listener = interrupt_listener
 
@@ -418,13 +525,13 @@ cdef class NESAPU:
         self.samples_per_cycle = SAMPLE_RATE * 1. / CPU_FREQ_HZ
         self.samples_required = 0
         self.rate=SAMPLE_RATE
+        self.irq_inhibit = True
 
         # the frame_interrupt_flag is connected to the CPU's IRQ line, so changes to this flag should be accompanied by
         # a change to the interrupt_listener's state
         self.frame_interrupt_flag = False
 
-
-        # sound output buffer
+        # sound output buffer (this is a ring buffer, so these variables track the current start and end position)
         self._buffer_start = 0
         self._buffer_end = 2000  # give it some bonus sound to start with
 
@@ -437,10 +544,6 @@ cdef class NESAPU:
         self.pulse2 = APUPulse(is_unit_1=False)
         self.noise = APUNoise()
         self.dmc = APUDMC(interrupt_listener)
-
-        # copy the length table to a int array (avoid python interaction)
-        for i in range(32):
-            self.length_table[i] = self.LENGTH_TABLE[i]
 
         for i in range(APU_BUFFER_LENGTH):
             self.output[i] = 0
@@ -486,6 +589,7 @@ cdef class NESAPU:
         return self.rate
 
     ######## interfacing with pyaudio #####################
+    # keep all pyaudio code in this section
 
     def pyaudio_callback(self, in_data, frame_count, time_info, status):
         if self.buffer_remaining() > 0:
@@ -612,6 +716,8 @@ cdef class NESAPU:
         """
         Write to one of the APU registers.
         """
+        cdef APUPulse pulse
+
         if address == STATUS:
             self._set_status(value)
         elif address == FRAME_COUNTER:
@@ -624,16 +730,16 @@ cdef class NESAPU:
             self._reset_timer_in = 3 + self.cycles % 2
         elif 0x4000 <= address <= 0x4007:
             # a pulse register
-            self._set_pulse(address, value)
+            # there are two pulse registers set by 0x4000-0x4003 and 0x4004-0x4007; select the correct one to update
+            pulse = self.pulse1 if address < 0x4004 else self.pulse2
+            pulse.write_register(address, value)
         elif 0x4008 <= address <= 0x400B:
             # a triangle register
-            self._set_triangle(address, value)
+            self.triangle.write_register(address, value)
         elif 0x400C <= address <= 0x400F:
-            self._set_noise(address, value)
+            self.noise.write_register(address, value)
         elif 0x4010 <= address <= 0x4013:
             self.dmc.write_register(address, value)
-
-        #print("apu write: {:02X} -> {:04X}".format(value, address))
 
     cdef void _set_status(self, unsigned char value):
         """
@@ -645,75 +751,6 @@ cdef class NESAPU:
         self.noise.set_enable(bit_high(value, BIT_ENABLE_NOISE))
         self.dmc.set_enable(bit_high(value, BIT_ENABLE_DMC))
 
-    cdef void _set_pulse(self, int address, unsigned char value):
-        """
-        Set properties of the pulse waveform generators from a write to one of their registers (there are two pulse
-        generators).
-        """
-        # there are two pulse registers set by 0x4000-0x4003 and 0x4004-0x4007; select the correct one to update
-        if address < 0x4004:
-            pulse = self.pulse1
-        else:
-            pulse = self.pulse2
-            address -= 4  # map down to the 0x4000-0x4003 range
-
-        if address == 0x4000:
-            pulse.duty = (value & 0b11000000) >> 6
-            pulse.ctr_halt = bit_high(value, 5)         # } these are the same
-            pulse.env.loop_flag = bit_high(value, 5)    # }
-            pulse.constant_volume = bit_high(value, 4)
-            pulse.env.volume = value & 0b00001111
-        elif address == 0x4001:
-            pulse.sweep_enable = bit_high(value, 7)
-            pulse.sweep_period = ((value & 0b01110000) >> 4) + 1
-            pulse.sweep_negate = bit_high(value, 3)
-            pulse.sweep_shift = value & 0b00000111
-            pulse.sweep_reload = True
-        elif address == 0x4002:
-            # timer low
-            pulse.period = (pulse.period & 0xFF00) + value
-        elif address == 0x4003:
-            pulse.period = (pulse.period & 0xFF) + ((value & 0b00000111) << 8)
-            pulse.length_ctr = self.length_table[value >> 3]
-            # side effect: the sequencer is restarted at the first value of the sequence and envelope is restarted [5]
-            pulse.phase = 0
-            # side effect: restart envelope and set the envelope start flag
-            pulse.env.restart()
-            pulse.env.start_flag = True
-
-    cdef void _set_triangle(self, int address, unsigned char value):
-        """
-        Set properties of the triangle waveform generator from a write to its registers.
-        """
-        if address == 0x4008:
-            self.triangle.ctr_halt = bit_high(value, 7)
-            # don't set the counter directly, just set the reload value for now
-            self.triangle.linear_reload_value = value & 0b01111111
-        elif address == 0x400A:
-            self.triangle.period = (self.triangle.period & 0xFF00) + value
-        elif address == 0x400B:
-            self.triangle.period = (self.triangle.period & 0xFF) + ((value & 0b00000111) << 8)
-            self.triangle.length_ctr = self.length_table[value >> 3]
-            self.triangle.linear_reload_flag = True
-
-    cdef void _set_noise(self, int address, unsigned char value):
-        """
-        Set properties of the noise waveform generators from a write to its registers.
-        """
-        if address == 0x400C:
-            self.noise.ctr_halt = bit_high(value, 5)    # } these are the same
-            self.noise.env.loop_flag = bit_high(value, 5)     # }
-            self.noise.constant_volume = bit_high(value, 4)
-            self.noise.env.volume = value & 0b00001111
-        elif address == 0x400E:
-            self.noise.mode = bit_high(value, 7)
-            self.noise.period = self.noise.timer_table[value & 0b00001111]
-        elif address == 0x400F:
-            self.noise.length_ctr = self.length_table[value >> 3]
-            # side effect: restart envelope and set the envelope start flag
-            self.noise.env.restart()
-            self.noise.env.start_flag = True
-
     cdef int mix(self, int triangle, int pulse1, int pulse2, int noise, int dmc):
         """
         Mix the channels into signed 16-bit audio samples
@@ -724,4 +761,4 @@ cdef class NESAPU:
         sum_tnd = (triangle / 8227.) + (noise / 12241.) + (dmc / 22638.)
         pulse_out = 95.88 / ((8128. / sum_pulse) + 100.) if sum_pulse != 0 else 0
         tnd_out = 159.79 / (1. / sum_tnd + 100.) if sum_tnd != 0 else 0
-        return int( (pulse_out + tnd_out) * self.master_volume * SAMPLE_SCALE)
+        return int( ((pulse_out + tnd_out) ) * self.master_volume * SAMPLE_SCALE)

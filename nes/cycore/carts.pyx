@@ -1,8 +1,15 @@
-# cython: profile=True, boundscheck=False, nonecheck=False
+# cython: profile=True, boundscheck=True, nonecheck=False, language_level=3
+import pyximport; pyximport.install()
+
+import logging
+
+
 DEF MIRROR_HORIZONTAL = (0, 0, 1, 1)
 DEF MIRROR_VERTICAL = (0, 1, 0, 1)
 DEF MIRROR_ONE_LOWER = (0, 0, 0, 0)
 DEF MIRROR_ONE_UPPER = (1, 1, 1, 1)
+
+from .bitwise cimport bit_high
 
 cdef class NESCart:
     """
@@ -36,6 +43,13 @@ cdef class NESCart:
         address specified
         """
         raise NotImplementedError()
+
+    cdef void irq_tick(self):
+        """
+        Function called on rising edges of PPU address line A12, which is used in some carts (MMC3 and derivatives) to
+        tick an IRQ counter.  Carts without PPU triggered IRQ functionality can ignore this.
+        """
+        pass
 
 
 ### Mapper 000 (aka NROM) ##############################################################################################
@@ -162,7 +176,7 @@ cdef class NESCart1(NESCart):
             for i in range(M1_PRG_ROM_BANK_SIZE):
                 self.banked_prg_rom[bnk][i] = prg_rom_data[bnk * M1_PRG_ROM_BANK_SIZE + i]
 
-        if self.num_prg_banks > 16:
+        if self.num_prg_banks > M1_MAX_PRG_BANKS:
             # this is a 512kb prg rom ROM
             raise ValueError("512kb MMC1 ROMs are not currently supported.  Sorry Dragon Warrior III/IV.")
 
@@ -463,3 +477,213 @@ cdef class NESCart2(NESCart0):
                 value &= self.read(address)
 
             self.prg_bank = value % self.num_prg_banks
+
+
+### Mapper 4 (aka MMC3) ################################################################################################
+# ref: https://wiki.nesdev.com/w/index.php/MMC3
+
+cdef class NESCart4(NESCart):
+    def __init__(self,
+                 prg_rom_data=None,
+                 chr_rom_data=None,
+                 chr_mem_writeable=False, # if True, the CHR memory is actually RAM, not ROM
+                 prg_ram_size_kb=8,       # size of prg RAM; must 8kb or 0
+                 nametable_mirror_pattern=MIRROR_HORIZONTAL,
+                 mirror_pattern_fixed=False,  # if true, the mirror pattern cannot be changed dynamically
+                 interrupt_listener=None,
+                ):
+        super().__init__()
+
+        if prg_ram_size_kb != 8 and prg_ram_size_kb != 0:
+            raise ValueError("PRG RAM size must be 8kb or 0")
+
+        # copy the prg rom data to the memory banks
+        self.num_prg_banks = int(len(prg_rom_data) / M4_PRG_ROM_BANK_SIZE)
+        print("PRG bytes: {}".format(len(prg_rom_data)))
+        print("Num PRG banks: {}".format(self.num_prg_banks))
+        if self.num_prg_banks * M4_PRG_ROM_BANK_SIZE != len(prg_rom_data):
+            raise ValueError("prg_rom_data size ({} bytes) is not an exact multiple of bank size ({} bytes)".format(len(prg_rom_data), M4_PRG_ROM_BANK_SIZE))
+        if self.num_prg_banks > M4_MAX_PRG_BANKS:
+            raise ValueError("Too much prg rom data ({} bytes) for a MMC3 cartridge (max is 512kb)".format(len(prg_rom_data)))
+
+        for bnk in range(self.num_prg_banks):
+            for i in range(M4_PRG_ROM_BANK_SIZE):
+                self.banked_prg_rom[bnk][i] = prg_rom_data[bnk * M4_PRG_ROM_BANK_SIZE + i]
+
+        # copy the chr rom data to the memory banks
+        self.num_chr_banks = int(len(chr_rom_data) / M4_CHR_ROM_BANK_SIZE)
+        print("CHR bytes: {}".format(len(chr_rom_data)))
+        print("Num CHR banks: {}".format(self.num_chr_banks))
+        if self.num_chr_banks * M4_CHR_ROM_BANK_SIZE != len(chr_rom_data):
+            raise ValueError("chr_rom_data size ({} bytes) is not an exact multiple of bank size ({} bytes)".format(len(chr_rom_data), M4_CHR_ROM_BANK_SIZE))
+
+        for bnk in range(self.num_chr_banks):
+            for i in range(M4_CHR_ROM_BANK_SIZE):
+                self.banked_chr_rom[bnk][i] = chr_rom_data[bnk * M4_CHR_ROM_BANK_SIZE + i]
+
+        self.chr_mem_writeable = chr_mem_writeable
+
+        # todo is this the right thing to do here?
+        if self.num_chr_banks == 0:
+            # if there is no chr rom, make a full-sized block of chr ram (overwrites user requested chr_mem_writeable)
+            self.num_chr_banks = 256
+            self.chr_mem_writeable = True
+
+        # set the startup state of the cart
+        self.interrupt_listener = interrupt_listener
+        self.bank_register[:] = [0] * 8
+        self.chr_a12_inversion = False
+        self.prg_bank_mode = 0
+        self.bank_select = 0
+        self.prg_ram_enable = True
+        self.prg_ram_protect = False
+        self.irq_reload_value = 10
+        self.irq_enabled = False
+        self.irq_counter = 10
+
+        # set the nametable mirror pattern
+        self.nametable_mirror_pattern[:] = nametable_mirror_pattern
+        self.mirror_pattern_fixed = mirror_pattern_fixed
+
+    cdef unsigned char read(self, int address):
+        cdef int window_slot
+        cdef int banks[4]
+
+        if M4_PRG_RAM_START <= address < M4_PRG_ROM_START:
+            if self.prg_ram_enable:
+                return self.ram[address % M4_PRG_RAM_SIZE]
+            else:
+                # todo: open bus behaviour
+                return 0
+        elif M4_PRG_ROM_START <= address:
+            if self.prg_bank_mode == 0:
+                # bank map in mode 0
+                banks[0] = self.bank_register[6] & 0b00111111
+                banks[1] = self.bank_register[7] & 0b00111111
+                banks[2] = self.num_prg_banks - 2
+                banks[3] = self.num_prg_banks - 1
+            else:
+                # bank map in mode 1
+                banks[0] = self.num_prg_banks - 2
+                banks[1] = self.bank_register[7] & 0b00111111
+                banks[2] = self.bank_register[6] & 0b00111111
+                banks[3] = self.num_prg_banks - 1
+
+            window_slot = (address >> 13) & 0b11     # address lines A13 and A14 determine the prg rom slot of address
+
+            #if address == 0xA1A1:
+            #    print(banks[0], banks[1], banks[2], banks[3], address, window_slot, self.num_prg_banks)
+
+            return self.banked_prg_rom[banks[window_slot] % self.num_prg_banks][address % M4_PRG_ROM_BANK_SIZE]
+
+    cdef void write(self, int address, unsigned char value):
+        if M4_PRG_RAM_START <= address < M4_PRG_ROM_START:
+            # ram write
+            if self.prg_ram_enable and not self.prg_ram_protect:
+                self.ram[address % M4_PRG_RAM_SIZE] = value
+        elif BANK_REG_START <= address < MIRROR_PROTECT_REG_START:
+            if address & 1 == 0:
+                # even address => bank select write
+                self.chr_a12_inversion = bit_high(value, 7)
+                self.prg_bank_mode = bit_high(value, 6)
+                self.bank_select = value & 0b111
+            else:
+                # odd address => bank data write (write one of the bank registers)
+                self.bank_register[self.bank_select] = value
+
+            #print([self.bank_register[i] for i in range(8)])
+            #print(self.chr_a12_inversion, self.prg_bank_mode, self.bank_select)
+
+
+        elif MIRROR_PROTECT_REG_START <= address < IRQ_LATCH_RELOAD_REG_START:
+            if address & 1 == 0 and not self.mirror_pattern_fixed:
+                # sets nametable mirror pattern
+                if value & 1:
+                    self.nametable_mirror_pattern[:] = MIRROR_HORIZONTAL
+                else:
+                    self.nametable_mirror_pattern[:] = MIRROR_VERTICAL
+            else:
+                # set prg_ram access
+                self.prg_ram_enable = bit_high(value, 7)
+                self.prg_ram_protect = bit_high(value, 6)
+        elif IRQ_LATCH_RELOAD_REG_START <= address < IRQ_ACTIVATE_START:
+            if address & 1 == 0:
+                self.irq_reload_value = value
+            else:
+                self.irq_reload = True   # reload irq at next tick
+        else:
+            # irq is disabled by any write to an even address in this range and activated by a write to any odd address
+            # in this range, so we can just use the bottom bit of the address line to set the irq_enabled flag
+            self.irq_enabled = address & 1
+            if not self.irq_enabled:
+                # if interrupts are disabled, any pending interrupts are acknowledged;
+                # todo: this will also clear pending interrupts from other IRQ producing devices (the APU), but these
+                # should not both be in operation at the same time anyway, since then they can be attempting to drive
+                # the line in different directions anyway.
+                self.interrupt_listener.reset_irq()
+
+            #print("IRQ en", self.irq_enabled, address)
+
+
+
+    cdef unsigned int _get_ppu_bank(self, int address):
+        cdef int window_slot  # the 1kb slot in the window that this address belongs to
+        cdef int banks[8]     # the banks that are mapped to each of the eight slots in the chr address space (each 1kb)
+        cdef int double_bank_start, single_bank_start  # which slots the 2kb and 1kb banks start in, respectively
+
+        if not self.chr_a12_inversion:
+            double_bank_start, single_bank_start = 0, 4
+        else:
+            double_bank_start, single_bank_start = 4, 0
+
+        # the chr memory banks corresponding to the 1kb window slots
+        banks[double_bank_start + 0] = self.bank_register[0] & 0b11111110
+        banks[double_bank_start + 1] = (self.bank_register[0] & 0b11111110) + 1
+        banks[double_bank_start + 2] = self.bank_register[1] & 0b11111110
+        banks[double_bank_start + 3] = (self.bank_register[1] & 0b11111110) + 1
+        banks[single_bank_start + 0] = self.bank_register[2]
+        banks[single_bank_start + 1] = self.bank_register[3]
+        banks[single_bank_start + 2] = self.bank_register[4]
+        banks[single_bank_start + 3] = self.bank_register[5]
+
+        #print([banks[i] for i in range(8)], self.num_chr_banks)
+
+        window_slot = (address >> 10) & 0b111   # address lines A10, A11 and A12 determine the slot
+        return banks[window_slot] % self.num_chr_banks
+
+    cdef unsigned char read_ppu(self, int address):
+        cdef unsigned int bank = self._get_ppu_bank(address)
+        return self.banked_chr_rom[bank][address % M4_CHR_ROM_BANK_SIZE]
+
+    cdef void write_ppu(self, int address, unsigned char value):
+        cdef unsigned int bank
+        if self.chr_mem_writeable:
+            bank = self._get_ppu_bank(address)
+            self.banked_chr_rom[bank][address % M4_CHR_ROM_BANK_SIZE] = value
+
+    cdef void irq_tick(self):
+        if self.irq_reload:
+            # if a reload has been triggered, do that and reset the reload flag
+            # add 1 to the counter here because this will be immediately decremented below and there should be N+1
+            # periods between IRQs
+            self.irq_counter = self.irq_reload_value + 1
+            self.irq_reload = False
+
+        if self.irq_counter > 0:
+            self.irq_counter -= 1
+
+        logging.log(logging.INFO, "IRQ counter = {}".format(self.irq_counter), extra={"source": "Cart"})
+
+        # currently, this implements "normal" or "new" behaviour (https://wiki.nesdev.com/w/index.php/MMC3), so that if
+        # the reload value is zero, an irq will be triggered every cycle rather than only once, but this can vary
+        # between MMC3 cartridges because on some the irq is only triggered as the counter is decremented to zero.
+        # For those old-style chips, writing to reload with the counter at zero will trigger another single IRQ
+        # todo: support "old" MMC3A behaviour
+        if self.irq_counter == 0:
+            self.irq_reload = True  # reload counter next time
+            if self.irq_enabled:
+                #print("IRQ")
+                self.interrupt_listener.raise_irq()
+
+
+

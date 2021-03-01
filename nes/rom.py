@@ -1,6 +1,6 @@
 import pyximport; pyximport.install()
 
-from .cycore.carts import NESCart0, NESCart1, NESCart2
+from .cycore.carts import NESCart0, NESCart1, NESCart2, NESCart4
 from .pycore.bitwise import upper_nibble, lower_nibble, bit_low, bit_high
 
 class ROM:
@@ -22,10 +22,11 @@ class ROM:
     MIRROR_VERTICAL = [0, 1, 0, 1]
     MIRROR_FOUR_SCREEN = [0, 1, 2, 3]
 
-    def __init__(self, filename):
+    def __init__(self, filename, verbose=True):
         self.prg_rom_bytes = None
         self.chr_rom_bytes = None
         self.mirror_pattern = None
+        self.mirror_ignore = None
         self.has_persistent = None
         self.has_trainer = None
         self.mapper_id = None
@@ -44,10 +45,13 @@ class ROM:
         self.chr_rom_data = None
         self.misc_rom_data = None
 
+        # verbose?
+        self.verbose = verbose
+
         if filename is not None:
             self.load(filename)
 
-    def load(self, filename):
+    def load(self, filename, ):
         """
         Load a ROM in the standard .nes file format
         """
@@ -79,10 +83,9 @@ class ROM:
             else self.MIRROR_VERTICAL
         self.has_persistent = bit_high(nesheader[6], self.PERSISTENT_BIT)
         self.has_trainer = bit_high(nesheader[6], self.TRAINER_BIT)
-        if bit_high(nesheader[6], self.MIRROR_IGNORE_BIT):  # if this is set, cart must provide 4-page vram
+        self.mirror_ignore = bit_high(nesheader[6], self.MIRROR_IGNORE_BIT)
+        if self.mirror_ignore:  # if this is set, cart provides a 4-page vram
             self.mirror_pattern = self.MIRROR_FOUR_SCREEN
-            # todo: Not implemented!
-            raise NotImplementedError("Four screen mirror pattern / nametables not currently supported")
 
         # header byte 7
         self.mapper_id = upper_nibble(nesheader[7]) * 16 + upper_nibble(nesheader[6])
@@ -91,11 +94,13 @@ class ROM:
         if not self.nes2:
             # header byte 8 (apparently often unused)
             self.prg_ram_bytes = max(1, nesheader[8]) * 8192
-            print("iNES (v1) Header")
+            if self.verbose:
+                print("iNES (v1) Header")
         else:
             # NES 2.0 format
             # https://wiki.nesdev.com/w/index.php/NES_2.0
-            print("NES 2.0 Header")
+            if self.verbose:
+                print("NES 2.0 Header")
             # header byte 8
             self.mapper_id += lower_nibble(nesheader[8]) * 256
             self.submapper_id = upper_nibble(nesheader[8])
@@ -116,14 +121,16 @@ class ROM:
             self.chr_ram_bytes = 64 << lower_nibble(nesheader[11])
             self.chr_nvram_bytes = 64 << upper_nibble(nesheader[11])
 
-        print("Mapper: {}".format(self.mapper_id))
-        print("prg_ram_bytes: {}".format(self.prg_ram_bytes))
-        print("chr_ram_bytes: {}".format(self.chr_ram_bytes))
-        print("prg_rom_bytes: {}".format(self.prg_rom_bytes))
-        print("chr_rom_bytes: {}".format(self.chr_rom_bytes))
-        #print("chr_ram_bytes: {}".format(self.chr_ram_bytes))
+        if self.verbose:
+            print("Mapper: {}".format(self.mapper_id))
+            print("prg_ram_bytes: {}".format(self.prg_ram_bytes))
+            print("chr_ram_bytes: {}".format(self.chr_ram_bytes))
+            print("prg_rom_bytes: {}".format(self.prg_rom_bytes))
+            print("chr_rom_bytes: {}".format(self.chr_rom_bytes))
+            print("mirror pattern: {}".format(self.mirror_pattern))
+            #print("chr_ram_bytes: {}".format(self.chr_ram_bytes))
 
-    def get_cart(self, prg_start):
+    def get_cart(self, interrupt_listener):
         """
         Get the correct type of cartridge object from this ROM, ready to be plugged into the NES system
         """
@@ -140,12 +147,21 @@ class ROM:
                             prg_ram_size_kb=self.prg_ram_bytes / 1024,
                             chr_mem_writeable=True if self.chr_ram_bytes else False,
                             nametable_mirror_pattern=self.mirror_pattern,
-                            )
+                           )
         elif self.mapper_id == 2:
             return NESCart2(prg_rom_data=self.prg_rom_data,
                             chr_rom_data=self.chr_rom_data,
                             nametable_mirror_pattern=self.mirror_pattern,
-                            )
-
+                           )
+        elif self.mapper_id == 4:
+            # MMC 3
+            return NESCart4(prg_rom_data=self.prg_rom_data,
+                            chr_rom_data=self.chr_rom_data,
+                            prg_ram_size_kb=self.prg_ram_bytes / 1024,
+                            chr_mem_writeable=True if self.chr_ram_bytes else False,
+                            nametable_mirror_pattern=self.mirror_pattern,
+                            mirror_pattern_fixed=self.mirror_ignore,
+                            interrupt_listener=interrupt_listener
+                           )
         else:
             print("Mapper {} not currently supported".format(self.mapper_id))

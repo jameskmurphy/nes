@@ -1,6 +1,5 @@
-"""
-Some common bitwise manipulations.  
-"""
+# cython: profile=True, boundscheck=True, nonecheck=False, language_level=3
+import pyximport; pyximport.install()
 
 cdef int set_bit(int target, int bit):
     """

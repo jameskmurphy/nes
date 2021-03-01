@@ -5,6 +5,10 @@ import pygame.freetype
 
 from OpenGL.GL import *
 
+# So, it turns out PyGame's surfarray already introduces this dependency; we probably need to refactor this away at
+# at some point, but for now, let's go with this.
+import numpy as np
+
 import array
 
 class ScreenBase:
@@ -42,13 +46,26 @@ class Screen(ScreenBase):
     PyGame based screen.
     Keep all PyGame-specific stuff in here (don't want PyGame specific stuff all over the rest of the code)
     """
-    def __init__(self, ppu, scale=3, vsync=False, show_overscan=False):
+    def __init__(self, ppu, scale=3, vsync=False, show_overscan=False, nametable_panel=False):
         super().__init__(ppu, scale, show_overscan)
+
+        self.nametable_panel = nametable_panel
+
+        if nametable_panel:
+            self.nt_buffer_surf = pygame.Surface((32 * 8 * 2, 30 * 8 * 2))
 
         # screens and buffers
         self.buffer_surf = pygame.Surface((self.width, self.height))
         self.buffer_sa = pygame.surfarray.pixels2d(self.buffer_surf)
-        self.screen = pygame.display.set_mode((self.width * self.scale, self.height * self.scale), vsync=vsync)
+
+        if nametable_panel:
+            scr_width = self.width * self.scale + 32 * 8 * 2
+            scr_height = max(self.height * self.scale, 30 * 8 * 2)
+        else:
+            scr_width = self.width * self.scale
+            scr_height = self.height * self.scale
+
+        self.screen = pygame.display.set_mode((scr_width, scr_height), vsync=vsync)
 
         # font for writing to HUD
         pygame.freetype.init()
@@ -63,10 +80,19 @@ class Screen(ScreenBase):
 
     def show(self):
         self.ppu.copy_screen_buffer_to(self.buffer_sa, self.show_overscan)
-        pygame.transform.scale(self.buffer_surf, (self.width * self.scale, self.height * self.scale), self.screen)
+        if self.nametable_panel:
+            #self.nt_buffer_surf.fill((0, 0, 0))
+            self.ppu.debug_render_nametables(pygame.surfarray.pixels2d(self.nt_buffer_surf))
+            scaled = pygame.transform.scale(self.buffer_surf, (self.width * self.scale, self.height * self.scale))
+            self.screen.blit(scaled, (0,0))
+            self.screen.blit(self.nt_buffer_surf, (self.width * self.scale, 0))
+        else:
+            pygame.transform.scale(self.buffer_surf, (self.width * self.scale, self.height * self.scale), self.screen)
         self._render_text(self.screen)
         pygame.display.flip()
         self.update_text()
+
+
 
     def clear(self, color=(0, 0, 0)):
         self.buffer_surf.fill(color)

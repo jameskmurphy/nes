@@ -1,3 +1,5 @@
+
+
 from .memory cimport NESVRAM
 from .system cimport InterruptListener
 
@@ -63,6 +65,11 @@ cdef enum:
                                 # see https://wiki.nesdev.com/w/index.php/Overscan
     PRERENDER_LINE = 261        # prerender scanline
 
+    SCREEN_TILE_ROWS = 30
+    SCREEN_TILE_COLS = 32
+    TILE_HEIGHT_PX = 8
+    TILE_WIDTH_PX = 8
+
     # size of a tile in the pattern table in bytes (width_px(8) x height_px(8) x bits_per_px(2) / bits_per_byte(8) == 16)
     PATTERN_SIZE_BYTES = 16
 
@@ -93,6 +100,7 @@ cdef class NESPPU:
         int _sprite_line[8]                    # lines of the active sprite that we are on
         char _sprite_pattern[8][8]             # decoded patterns for the active sprites
         int _num_active_sprites                # how many sprites are active in this current line
+        bint irq_tick_triggers[68]             # whether or not an irq tick is triggered on this pixel of sprite fetch
 
         # Background rendering
         unsigned int _pattern_lo, _pattern_hi   # 16-bit bkg pattern registers (only bottom 16 bits relevant)
@@ -107,8 +115,8 @@ cdef class NESPPU:
         unsigned int screen_buffer[256][240]
 
         # palettes for all the colors the NES can display
-        int rgb_palette[64][3]    # in standard RGB format
-        int hex_palette[64]       # in packed 32 bit xRGB format
+        unsigned int rgb_palette[64][3]    # in standard RGB format
+        unsigned int hex_palette[64]       # in packed 32 bit xRGB format
 
         # special colors that are in use
         int transparent_color, bkg_color
@@ -123,6 +131,7 @@ cdef class NESPPU:
     cdef void write_oam(self, unsigned char* data)
 
     # screen buffer copy and clear
+    cdef int get_background_color(self)
     cpdef void copy_screen_buffer_to(self, unsigned int[:, :] dest, bint include_vertical_overscan=?)
     cdef void _clear_to_bkg(self)
 
@@ -152,3 +161,9 @@ cdef class NESPPU:
     # palette decoding and caching
     cdef void decode_palette(self, int* palette_out, int palette_id, bint is_sprite)
     cdef void invalidate_palette_cache(self)
+
+    # debug
+    cpdef void debug_render_nametables(self, unsigned int[:, :] dest)
+    cpdef void debug_render_tile(self, unsigned int[:, :] dest, int x0, int y0, int tile_index, int tile_bank, int palette_id, bint flip_h, bint flip_v)
+
+

@@ -1,12 +1,13 @@
 """
 Meta code that generates the run_instr function for the MOS6502 from the instruction tables.  This replaced a possibly
-nicer python-y way of doing the instruction decoding that turned out to be slow and not very compatible with Cython
+nicer pythonic way of doing the instruction decoding that turned out to be slow and not very compatible with Cython
 optimization.
 
 Run this file and copy its output to the end of mos6502.pyx
 """
 
-from nes.instructions import INSTRUCTION_SET, AddressModes
+from .instructions import INSTRUCTION_SET, AddressModes
+
 
 def generate_cpu_instruction_table(tab_level = 1, spaces_per_tab=4):
     first_code = True
@@ -45,6 +46,7 @@ def generate_cpu_instruction_table(tab_level = 1, spaces_per_tab=4):
             indent = " " * tab_level * spaces_per_tab
     print(indent)
     print(indent + "return cycles")
+
 
 def generate_addressing(indent, mode, cycles):
     cde = indent

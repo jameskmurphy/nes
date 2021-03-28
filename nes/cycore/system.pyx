@@ -1,14 +1,14 @@
 # cython: profile=True, boundscheck=True, nonecheck=False, language_level=3
-import pyximport; pyximport.install()
+# import pyximport; pyximport.install()
 
-from nes.cycore.mos6502 cimport MOS6502
-from nes.cycore.memory cimport NESMappedRAM
-from nes.cycore.ppu cimport NESPPU
-from nes.cycore.apu cimport NESAPU
+from .mos6502 cimport MOS6502
+from .memory cimport NESMappedRAM
+from .ppu cimport NESPPU
+from .apu cimport NESAPU
+
 from nes.rom import ROM
 from nes.peripherals import Screen, ScreenGL, KeyboardController, ControllerBase
-from nes import LOG_CPU, LOG_PPU, LOG_MEMORY
-import pickle
+from nes.utils import load_palette
 
 import logging
 
@@ -19,6 +19,10 @@ import time
 
 from .apu cimport SAMPLE_RATE
 
+# custom log levels to control the amount of logging (these are mostly unused because logging is mostly disabled)
+LOG_MEMORY = 5
+LOG_PPU = 6
+LOG_CPU = 7
 
 cdef class InterruptListener:
     def __init__(self):
@@ -71,7 +75,19 @@ cdef class NES:
     OSD_NOTE_COLOR = (255, 128, 0)
     OSD_WARN_COLOR = (255, 0, 0)
 
-    def __init__(self, rom_file, screen_scale=3, log_file=None, log_level=None, sync_mode=SYNC_VSYNC, verbose=True):
+    def __init__(self,
+                 rom_file,                  # the rom file to load
+                 screen_scale=3,            # factor by which to scale the screen
+                 log_file=None,             # file to log to (logging is largely turned off by default)
+                 log_level=None,            # level of logging (logging is largely turned off by default)
+                 opengl=False,              # use opengl for screen rendering
+                 sync_mode=SYNC_AUDIO,      # audio / video sync mode
+                 verbose=True,              # whether to print out cartridge info at startup
+                 show_nametables=False,     # shows the nametables alongside the main screen (for debug, not opengl)
+                 vertical_overscan=False,   # show the top and bottom 8 pixels (not usually visible on CRT TVs)
+                 horizontal_overscan=False, # show the left and right 8 pixels (often not visible on CRT TVs)
+                 palette_file=None,         # supply a palette file to use; None gives default
+                 ):
         """
         Build a NES and cartridge from the bits and pieces we have lying around plus some rom data!  Also do some things
         like set up logging, etc.
@@ -95,12 +111,33 @@ cdef class NES:
         self.controller1 = KeyboardController()
         self.controller2 = ControllerBase(active=False)   # connect a second gamepad, but make it inactive for now
 
+        # load the requested palette
+        if palette_file is not None:
+            palette = load_palette(palette_file)
+        else:
+            palette = None
+
         # set up the APU and the PPU
-        self.ppu = NESPPU(cart=self.cart, interrupt_listener=self.interrupt_listener)
+        self.ppu = NESPPU(cart=self.cart, interrupt_listener=self.interrupt_listener, palette=palette)
         self.apu = NESAPU(interrupt_listener=self.interrupt_listener)
 
         # screen needs to have the PPU
-        self.screen = Screen(ppu=self.ppu, scale=screen_scale, vsync=True if sync_mode == SYNC_VSYNC else False, nametable_panel=True)
+        if opengl:
+            self.screen = ScreenGL(ppu=self.ppu,
+                                 scale=screen_scale,
+                                 vsync=True if sync_mode == SYNC_VSYNC else False,
+                                 vertical_overscan=vertical_overscan,
+                                 horizontal_overscan=horizontal_overscan
+                                 )
+        else:
+            self.screen = Screen(ppu=self.ppu,
+                                 scale=screen_scale,
+                                 vsync=True if sync_mode == SYNC_VSYNC else False,
+                                 nametable_panel=show_nametables,
+                                 vertical_overscan=vertical_overscan,
+                                 horizontal_overscan=horizontal_overscan
+                                 )
+
         self.screen_scale = screen_scale
 
         # due to memory mapping, lots of things are connected to the main memory
@@ -144,25 +181,6 @@ cdef class NES:
                             )
         logging.root.setLevel(log_level)
 
-    def __getstate__(self):
-        state = self.memory.__getstate__() #(self.cart, self.controller1, self.controller2, self.interrupt_listener, self.cpu, self.memory, self.screen_scale)
-        return state
-
-    def __setstate__(self, state):
-        self.cart, self.controller1, self.controller2, self.interrupt_listener, self.cpu, self.memory, self.screen_scale = state
-        self.screen = Screen(scale=self.screen_scale)
-
-    def save(self):
-        with open("test.p", "wb") as f:
-            pickle.dump(self, f, protocol=4)
-
-    @staticmethod
-    def load(file):
-        with open(file, "rb") as f:
-            nes = pickle.load(f)
-        nes.screen._special_init()
-        return nes
-
     cdef int step(self, int log_cpu):
         """
         The heartbeat of the system.  Run one instruction on the CPU and the corresponding amount of cycles on the
@@ -173,7 +191,6 @@ cdef class NES:
         cdef bint vblank_started=False
 
         if self.interrupt_listener.any_active():
-            # do it this way for speed
             if self.interrupt_listener.nmi_active():
                 cpu_cycles = self.cpu.trigger_nmi()  # raises an NMI on the CPU, but this does take some CPU cycles
                 # should we do this here or leave this up to the triggerer?  It's really up to the triggerer to put the NMI
@@ -198,11 +215,15 @@ cdef class NES:
                 cpu_cycles = self.cpu.dma_pause(self.interrupt_listener.dma_pause,
                                                 self.interrupt_listener.dma_pause_count
                                                 )
+                if log_cpu:
+                    logging.log(logging.INFO,
+                                "OAM DMA (type: {}, count: {})".format(self.interrupt_listener.dma_pause,
+                                                                       self.interrupt_listener.dma_pause_count),
+                                extra={"source": "Interrupt"}
+                                )
+
                 self.interrupt_listener.reset_dma_pause()
                 had_dma_pause = True
-                if log_cpu:
-                    logging.log(logging.INFO, "OAM DMA", extra={"source": "Interrupt"})
-
         if cpu_cycles == 0:
             cpu_cycles = self.cpu.run_next_instr()
             if log_cpu:
@@ -225,6 +246,9 @@ cdef class NES:
         cdef double fps, t_start=0.
         cdef bint show_hud=True, log_cpu=False, mute=False, audio_drop=False
         cdef int frame=0, frame_start=0, cpu_cycles=0, last_sound_buffer=0
+
+
+        print("Starting Emulator 2")
 
         p = pyaudio.PyAudio()
 
@@ -343,34 +367,12 @@ cdef class NES:
             else:
                 audio_drop = False
 
-            #if frame % 60 == 0:
-            #    self.debug_draw_nametables()
-
             frame += 1
 
     cpdef void run_frame_headless(self):
         vblank_started=False
         while not vblank_started:
             vblank_started = self.step(log_cpu=False)
-
-
-
-    cdef void debug_draw_nametables(self):
-        cdef int nx, ny, x, y
-        line = ""
-
-        for ny in range(2):
-            for y in range(30):
-                line = ""
-                for nx in range(2):
-                    base = 0x2000 + 0x800 * ny + 0x400 * nx
-                    for x in range(32):
-                        tile = self.ppu.vram.read(base + 32 * y + x)
-                        line += "{:2X} ".format(tile)
-                    line += "     "
-                print(line)
-            print()
-        print("scroll {}, {}".format(self.ppu.ppu_scroll[0], self.ppu.ppu_scroll[1]))
 
 
 

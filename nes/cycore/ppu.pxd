@@ -1,5 +1,3 @@
-
-
 from .memory cimport NESVRAM
 from .system cimport InterruptListener
 
@@ -62,6 +60,7 @@ cdef enum:
     SCREEN_WIDTH_PX = 256       # visible screen width (number of visible pixels per row)
     SCREEN_HEIGHT_PX = 240      # visible screen height (number of visible rows)
     VERTICAL_OVERSCAN_PX = 8    # The NES assumes that the top and bottom 8 rows will not be visible due to CRT overscan
+    HORIZONTAL_OVERSCAN_PX = 8  # Some games look better with horizontal overscan s
                                 # see https://wiki.nesdev.com/w/index.php/Overscan
     PRERENDER_LINE = 261        # prerender scanline
 
@@ -115,7 +114,7 @@ cdef class NESPPU:
         unsigned int screen_buffer[256][240]
 
         # palettes for all the colors the NES can display
-        unsigned int rgb_palette[64][3]    # in standard RGB format
+        #unsigned int rgb_palette[64][3]    # in standard RGB format
         unsigned int hex_palette[64]       # in packed 32 bit xRGB format
 
         # special colors that are in use
@@ -132,7 +131,7 @@ cdef class NESPPU:
 
     # screen buffer copy and clear
     cdef int get_background_color(self)
-    cpdef void copy_screen_buffer_to(self, unsigned int[:, :] dest, bint include_vertical_overscan=?)
+    cpdef void copy_screen_buffer_to(self, unsigned int[:, :] dest, bint v_overscan=?, bint h_overscan=?)
     cdef void _clear_to_bkg(self)
 
     # registers read/write

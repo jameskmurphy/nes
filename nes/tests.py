@@ -45,7 +45,7 @@ def nestest(num_instrs, suppress_until=0):
             print(cpulog)
             print(truelog[:-1])
 
-        # compare the crucial last bit of the lines, excluding (for now) the PPU states:
+        # compare the crucial last bit of the lines, excluding the PPU location:
         if cpulog[48:74] != truelog[48:74] or cpulog[87:] != truelog[87:-1]:
             error_lines.append(0)
             print(" *************** ERROR ")

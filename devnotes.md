@@ -10,7 +10,7 @@ Corrections
 ### Game and Other Errors
 
 * APU
-  * Some popping at end of pulse notes.  Especially noticeable on stage 1-2 of SMB.  Possibly also a missed note?
+  * Some popping at end of pulse notes?  Especially noticeable on stage 1-2 of SMB.  Possibly also a missed note?
 * MMC3
   * Gun Nac doesn't boot
 
@@ -32,19 +32,10 @@ Improvements
 
 ### Emulator Improvements
 
-* Save / load emulator state
-* Record / replay keypresses
 * Fully headless operation
   * take input keypresses
   * output frame bitmap, audio
-  * headless without pygame, pyaudio
-* Config via options file
-  * pass this to NES on instantiation, also have a default one that is used otherwise
-  * config options
-    * sync mode
-    * input devices and keymaps
-    * resolution and scale
-    * fullscreen
+  * run headless without pygame, pyaudio
 * ALE sytle interface
   * Find lives, score counters, start point for a few games
 * pip installable
@@ -54,6 +45,9 @@ Improvements
     * make the config for this nicer
   * vram viewer
   * memory viewer
+* Save / load emulator state
+* Record / replay keypresses
+
 
 
 ### New Features
@@ -67,7 +61,7 @@ Improvements
 ### Major Todo
 
 * Check APU IRQ handling against new IRQ system
-* Mappers  (currently support ~50% of games)
+* Mappers  (currently support ~75% of games)
   * Mappers 3, 7 and 11 (all quite simple with quite a few games ~10% ish between them)
   * Mapper 206 if easy from MMC3  (~2%)
 * Still some sync problems sometimes

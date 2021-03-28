@@ -1,5 +1,5 @@
 # cython: profile=True, boundscheck=True, nonecheck=False, language_level=3
-import pyximport; pyximport.install()
+# import pyximport; pyximport.install()
 
 # important to cimport these rather than import them because that makes them have a lot less python interaction
 from .bitwise cimport bit_high, bit_low, set_bit, clear_bit, set_high_byte, set_low_byte
@@ -41,7 +41,7 @@ cdef class NESPPU:
         [6] Register behaviour: https://wiki.nesdev.com/w/index.php/PPU_registers
         [7] Scrolling: https://wiki.nesdev.com/w/index.php/PPU_scrolling
     """
-    def __init__(self, cart=None, interrupt_listener=None):
+    def __init__(self, cart=None, interrupt_listener=None, palette=None):
 
         # Registers
         self.ppu_ctrl = 0
@@ -87,36 +87,17 @@ cdef class NESPPU:
         self.interrupt_listener = interrupt_listener
 
         # palette: use the default, but can be replaced using utils.load_palette
-        self.rgb_palette = DEFAULT_NES_PALETTE
-        self.set_hex_palette()
+        self.set_hex_palette(palette if palette is not None else DEFAULT_NES_PALETTE)
         self.transparent_color = -1
 
         self._palette_cache_valid[:] = [0, 0, 0, 0, 0, 0, 0, 0]
         self.irq_tick_triggers[:] = [False] * 68
 
-    def set_hex_palette(self):
-        for i, c in enumerate(self.rgb_palette):
+    def set_hex_palette(self, rgb_palette):
+        for i, c in enumerate(rgb_palette):
             self.hex_palette[i] = (c[0] << 16) + (c[1] << 8) + c[2]
 
-    @property
-    def in_vblank(self):
-        return self.in_vblank
-
-    @property
-    def cycles_since_reset(self):
-        return self.cycles_since_reset
-
-    @property
-    def line(self):
-        return self.line
-
-    @property
-    def pixel(self):
-        return self.pixel
-
-    @property
-    def oam_addr(self):
-        return self.oam_addr
+    ################ Copy OAM data #####################################################################################
 
     cdef void write_oam(self, unsigned char* data):
         cdef int i
@@ -235,6 +216,7 @@ cdef class NESPPU:
             self.ppu_scroll[self._ppu_byte_latch] = value
             # flip which byte is pointed to on each write; reset on ppu status read.  Latch shared with ppu_addr.
             self._ppu_byte_latch = 1 - self._ppu_byte_latch
+            #print("set scroll: line {}, px {}, y-scroll: {}".format(self.line, self.pixel, self.ppu_scroll[PPU_SCROLL_Y]))
         elif register == PPU_ADDR:
             # write only
             # high byte first
@@ -246,12 +228,14 @@ cdef class NESPPU:
                 self.ppu_ctrl = (self.ppu_ctrl & 0b11111100) + ((value & 0b00001100) >> 2)
 
                 # a write here also has a very unusual effect on the coarse and fine y scroll [7]
-                self.ppu_scroll[PPU_SCROLL_Y] = (self.ppu_scroll[PPU_SCROLL_Y] & 0b00111100) + \
+                # (note that bit 2 of PPU_SCROLL_Y is always set to 0 by this)
+                self.ppu_scroll[PPU_SCROLL_Y] = (self.ppu_scroll[PPU_SCROLL_Y] & 0b00111000) + \
                                                      ((value & 0b00000011) << 6) + ((value & 0b00110000) >> 4)
                 if bit_low(prev_ppu_addr, 12) and bit_high(self.ppu_addr, 12):
                     self.vram.cart.irq_tick()
-            else:
 
+                #print("set scroll: line {}, px {}, y-scroll: {}".format(self.line, self.pixel, self.ppu_scroll[PPU_SCROLL_Y]))
+            else:
                 self.ppu_addr = (self.ppu_addr & 0xFF00) + value
                 # writes here have a weird effect on the x and y scroll values [7]
                 self.ppu_scroll[PPU_SCROLL_X] = (self.ppu_scroll[PPU_SCROLL_X] & 0b00000111) + ((value & 0b00011111) << 3)
@@ -260,6 +244,7 @@ cdef class NESPPU:
                 # side effect is that y-scroll is changed immediately, allowing mid-frame y-scroll changes
                 # this only happens on the second write to ppu_addr
                 self._reset_effective_y()
+                #print("set scroll: line {}, px {}, y-scroll: {} (IMMEDIATE)".format(self.line, self.pixel, self.ppu_scroll[PPU_SCROLL_Y]))
 
             # flip which byte is pointed to on each write; reset on ppu status read
             self._ppu_byte_latch = 1 - self._ppu_byte_latch
@@ -299,18 +284,22 @@ cdef class NESPPU:
             for y in range(SCREEN_HEIGHT_PX):
                 self.screen_buffer[x][y] = cc
 
-    cpdef void copy_screen_buffer_to(self, unsigned int[:, :] dest, bint include_vertical_overscan=False):
+    cpdef void copy_screen_buffer_to(self, unsigned int[:, :] dest, bint v_overscan=False, bint h_overscan=False):
         """
         Copy the screen buffer to a supplied destination.  Up to the caller to ensure that the destination buffer
         has sufficient space to write into.
         """
         cdef start_line=VERTICAL_OVERSCAN_PX, end_line=SCREEN_HEIGHT_PX - VERTICAL_OVERSCAN_PX
-        if include_vertical_overscan:
+        cdef start_row=HORIZONTAL_OVERSCAN_PX, end_row=SCREEN_WIDTH_PX - HORIZONTAL_OVERSCAN_PX
+        if v_overscan:
             start_line = 0
             end_line = SCREEN_HEIGHT_PX
+        if h_overscan:
+            start_row = 0
+            end_row = SCREEN_WIDTH_PX
         # create a memory view to the screen to allow it to be treated as a buffer in the Numpy-esque style
         cdef unsigned int[:, :] scr_mv = <unsigned int[:SCREEN_WIDTH_PX, :SCREEN_HEIGHT_PX]>self.screen_buffer
-        dest[:, :] = scr_mv[:, start_line:end_line]
+        dest[:, :] = scr_mv[start_row:end_row, start_line:end_line]
 
 
     ################ Main cycle running ################################################################################
@@ -408,9 +397,16 @@ cdef class NESPPU:
             self._effective_x = self.ppu_scroll[PPU_SCROLL_X] + (bit_high(self.ppu_ctrl, BIT_NAMETABLE_X) << 8)
         elif self.pixel == 280:
             # increment y to next row
-            self._effective_y += 1
-            if (self._effective_y & 0xFF) == 240:  # can only go up to 239 before wrapping to 256
-                self._effective_y += 16  # skip over the attribute table to the next nametable (equivalent to 2 rows)
+            if (self._effective_y & 0xFF) == 239:  # can only go up to 239 before wrapping to 256
+                self._effective_y += 17  # skip over the attribute table to the next nametable (equivalent to 2 rows)
+            elif (self._effective_y & 0xFF) == 255:  # but if scroll is set into the "illegal zone"
+                # if scroll is set into the out-of-bounds zone between lines 240-255, that is okay, which causes the
+                # attribute table to be read as tile data; this achieves a sort of negative scroll that some games use
+                # especially noticable in the bouncing of the SMB3 logo in the title sequence of SMB3, which will not
+                # work properly without this obscure behaviour. See https://wiki.nesdev.com/w/index.php/PPU_scrolling
+                self._effective_y &= 0x100
+            else:
+                self._effective_y += 1
         elif self.pixel == 328 or self.pixel == 336:   # pixels 321 - 336
             # fill background data latches with data for first two tiles of next scanline
             self.fill_bkg_latches()  # get some more data for the upper latches
@@ -424,9 +420,6 @@ cdef class NESPPU:
             # into the irq_tick_triggers array, so all we have to do here is test if this pixel has the trigger be true
             if self.irq_tick_triggers[self.pixel - 257]:
                 self.vram.cart.irq_tick()
-
-        #if self.pixel == 0:
-        #    print("line {}".format(self.line))
 
     cdef void increment_pixel(self):
         """
@@ -468,7 +461,10 @@ cdef class NESPPU:
         # account for the fact that the attribute table has been crossed.
         self._effective_y = (self.ppu_scroll[PPU_SCROLL_Y] + (bit_high(self.ppu_ctrl, BIT_NAMETABLE_Y) << 8)) & 0x1FF
         if self.ppu_scroll[PPU_SCROLL_Y] >= 240:
-            self._effective_y += 16
+            pass
+            #self._effective_y += 16
+        #if self.line==261:
+         #   print(self.line, self.pixel, self._effective_y, self.ppu_scroll[PPU_SCROLL_Y], bit_high(self.ppu_ctrl, BIT_NAMETABLE_Y))
 
 
     ################ Sprite decoding and rendering #####################################################################
@@ -571,7 +567,6 @@ cdef class NESPPU:
             # base was zero, it will then go high, triggering an irq tick
             if table_base == 0:
                 self.irq_tick_triggers[self._num_active_sprites * 8] = True
-
 
     cdef int _overlay_sprites(self, int bkg_pixel):
         """

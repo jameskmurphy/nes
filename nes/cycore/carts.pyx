@@ -1,8 +1,7 @@
 # cython: profile=True, boundscheck=True, nonecheck=False, language_level=3
-import pyximport; pyximport.install()
+#import pyximport; pyximport.install()
 
 import logging
-
 
 DEF MIRROR_HORIZONTAL = (0, 0, 1, 1)
 DEF MIRROR_VERTICAL = (0, 1, 0, 1)
@@ -52,7 +51,7 @@ cdef class NESCart:
         pass
 
 
-### Mapper 000 (aka NROM) ##############################################################################################
+### Mapper 0 (aka NROM) ################################################################################################
 
 cdef class NESCart0(NESCart):
     """
@@ -531,15 +530,15 @@ cdef class NESCart4(NESCart):
 
         # set the startup state of the cart
         self.interrupt_listener = interrupt_listener
-        self.bank_register[:] = [0] * 8
+        self.bank_register[:] = [0, 2, 4, 5, 6, 7, 0, 1]   # copied these from somewhere (didn't help with GunNac)
         self.chr_a12_inversion = False
         self.prg_bank_mode = 0
         self.bank_select = 0
         self.prg_ram_enable = True
         self.prg_ram_protect = False
-        self.irq_reload_value = 10
-        self.irq_enabled = False
-        self.irq_counter = 10
+        self.irq_reload_value = 0xFF
+        self.irq_enabled = True
+        self.irq_counter = 0xFF
 
         # set the nametable mirror pattern
         self.nametable_mirror_pattern[:] = nametable_mirror_pattern
@@ -570,10 +569,6 @@ cdef class NESCart4(NESCart):
                 banks[3] = self.num_prg_banks - 1
 
             window_slot = (address >> 13) & 0b11     # address lines A13 and A14 determine the prg rom slot of address
-
-            #if address == 0xA1A1:
-            #    print(banks[0], banks[1], banks[2], banks[3], address, window_slot, self.num_prg_banks)
-
             return self.banked_prg_rom[banks[window_slot] % self.num_prg_banks][address % M4_PRG_ROM_BANK_SIZE]
 
     cdef void write(self, int address, unsigned char value):
@@ -590,10 +585,6 @@ cdef class NESCart4(NESCart):
             else:
                 # odd address => bank data write (write one of the bank registers)
                 self.bank_register[self.bank_select] = value
-
-            #print([self.bank_register[i] for i in range(8)])
-            #print(self.chr_a12_inversion, self.prg_bank_mode, self.bank_select)
-
 
         elif MIRROR_PROTECT_REG_START <= address < IRQ_LATCH_RELOAD_REG_START:
             if address & 1 == 0 and not self.mirror_pattern_fixed:
@@ -622,10 +613,6 @@ cdef class NESCart4(NESCart):
                 # the line in different directions anyway.
                 self.interrupt_listener.reset_irq()
 
-            #print("IRQ en", self.irq_enabled, address)
-
-
-
     cdef unsigned int _get_ppu_bank(self, int address):
         cdef int window_slot  # the 1kb slot in the window that this address belongs to
         cdef int banks[8]     # the banks that are mapped to each of the eight slots in the chr address space (each 1kb)
@@ -646,8 +633,6 @@ cdef class NESCart4(NESCart):
         banks[single_bank_start + 2] = self.bank_register[4]
         banks[single_bank_start + 3] = self.bank_register[5]
 
-        #print([banks[i] for i in range(8)], self.num_chr_banks)
-
         window_slot = (address >> 10) & 0b111   # address lines A10, A11 and A12 determine the slot
         return banks[window_slot] % self.num_chr_banks
 
@@ -664,8 +649,8 @@ cdef class NESCart4(NESCart):
     cdef void irq_tick(self):
         if self.irq_reload:
             # if a reload has been triggered, do that and reset the reload flag
-            # add 1 to the counter here because this will be immediately decremented below and there should be N+1
-            # periods between IRQs
+            # (add 1 to the counter here because this will be immediately decremented below and there should be N + 1
+            # periods between IRQs)
             self.irq_counter = self.irq_reload_value + 1
             self.irq_reload = False
 
@@ -682,7 +667,6 @@ cdef class NESCart4(NESCart):
         if self.irq_counter == 0:
             self.irq_reload = True  # reload counter next time
             if self.irq_enabled:
-                #print("IRQ")
                 self.interrupt_listener.raise_irq()
 
 

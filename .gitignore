@@ -134,3 +134,10 @@ dmypy.json
 /roms
 *.ipynb
 /testroms
+/junk
+/logs
+/build
+
+# Cython objects
+/nes/cycore/*.c
+/nes/cycore/*.so

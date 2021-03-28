@@ -1,5 +1,5 @@
 # cython: profile=True, boundscheck=True, nonecheck=False, language_level=3
-import pyximport; pyximport.install()
+#import pyximport; pyximport.install()
 
 
 from .system cimport OAM_DMA, DMC_DMA, DMC_DMA_DURING_OAM_DMA
@@ -118,7 +118,6 @@ cdef class MOS6502:
     @property
     def cycles_since_reset(self):
         return self.cycles_since_reset
-
 
     def _make_bytecode_dict(self):
         """

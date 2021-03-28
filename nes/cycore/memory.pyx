@@ -1,7 +1,9 @@
 # cython: profile=True, boundscheck=True, nonecheck=False, language_level=3
-import pyximport; pyximport.install()
+#import pyximport; pyximport.install()
 
 from .system cimport OAM_DMA
+from .ppu cimport OAM_SIZE_BYTES, NUM_PPU_REGISTERS
+
 
 cdef class MemoryBase:
     """
@@ -18,21 +20,6 @@ cdef class MemoryBase:
 
 
 ###### Main Memory #####################################################################################################
-
-# NES Main memory map locations
-DEF RAM_END = 0x2000            # NES main ram to here  (2kb mirrored 4x)
-DEF PPU_END = 0x4000            # PPU registers to here
-DEF APU_END = 0x4018            # APU registers (+OAM DMA reg and controllers) to here
-DEF APU_UNUSED_END = 0x4020     # generally unused APU and I/O functionality
-DEF OAM_DMA = 0x4014            # OAM DMA register address
-DEF CONTROLLER1 = 0x4016        # port for controller (read controller 1 / write both controllers)
-DEF CONTROLLER2 = 0x4017        # port for controller 2 (read only, writes to this port go to the APU)
-DEF CART_START = 0x4020         # start of cartridge address space
-
-# OAM memory size for the DMA transfer
-from nes.cycore.ppu cimport OAM_SIZE_BYTES, NUM_PPU_REGISTERS
-
-
 cdef class NESMappedRAM(MemoryBase):
     """
     NES memory following NES CPU memory map pattern
@@ -63,7 +50,7 @@ cdef class NESMappedRAM(MemoryBase):
         elif address < PPU_END:  # PPU registers
             value = self.ppu.read_register(address % NUM_PPU_REGISTERS)
         elif address < APU_END:
-            if address == OAM_DMA:
+            if address == OAM_DMA_REG:
                 # write only
                 value = 0
             elif address == CONTROLLER1:
@@ -98,7 +85,7 @@ cdef class NESMappedRAM(MemoryBase):
             register_ix = address % NUM_PPU_REGISTERS
             self.ppu.write_register(register_ix, value)
         elif address < APU_END:
-            if address == OAM_DMA:
+            if address == OAM_DMA_REG:
                 self.run_oam_dma(value)
             elif address == CONTROLLER1:
                 self.controller1.set_strobe(value)

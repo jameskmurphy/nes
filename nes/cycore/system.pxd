@@ -1,3 +1,4 @@
+# cython: profile=True, boundscheck=True, nonecheck=False, language_level=3
 from .ppu cimport NESPPU
 from .apu cimport NESAPU
 from .carts cimport NESCart
@@ -56,5 +57,3 @@ cdef class NES:
     cdef int step(self, int log_cpu)
     cpdef void run(self)
     cpdef void run_frame_headless(self)
-
-    cdef void debug_draw_nametables(self)

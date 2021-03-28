@@ -18,7 +18,18 @@ cdef class MemoryBase:
 ######## NES Main Memoroy #############################################
 
 cpdef enum:
-    RAM_SIZE = 0x800            # 2kB of internal RAM
+    RAM_SIZE = 2048             # 2kB of internal RAM
+
+    # NES Main Memory locations
+    RAM_END = 0x2000            # NES main ram to here  (2kb mirrored 4x)
+    PPU_END = 0x4000            # PPU registers to here
+    APU_END = 0x4018            # APU registers (+OAM DMA reg and controllers) to here
+    APU_UNUSED_END = 0x4020     # generally unused APU and I/O functionality
+    OAM_DMA_REG = 0x4014        # OAM DMA register address
+    CONTROLLER1 = 0x4016        # port for controller (read controller 1 / write both controllers)
+    CONTROLLER2 = 0x4017        # port for controller 2 (read only, writes to this port go to the APU)
+    CART_START = 0x4020         # start of cartridge address space
+
 
 cdef class NESMappedRAM(MemoryBase):
     cdef unsigned char ram[RAM_SIZE]

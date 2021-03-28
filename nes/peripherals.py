@@ -5,12 +5,6 @@ import pygame.freetype
 
 from OpenGL.GL import *
 
-# So, it turns out PyGame's surfarray already introduces this dependency; we probably need to refactor this away at
-# at some point, but for now, let's go with this.
-import numpy as np
-
-import array
-
 class ScreenBase:
     """
     Base class for screens.  Not library specific.
@@ -18,13 +12,15 @@ class ScreenBase:
     WIDTH_PX = 256
     HEIGHT_PX = 240
     VISIBLE_HEIGHT_PX = 224
+    VISIBLE_WIDTH_PX = 240
 
-    def __init__(self, ppu, scale=3, show_overscan=False):
+    def __init__(self, ppu, scale=3, vertical_overscan=False, horizontal_overscan=False):
         self.ppu = ppu
-        self.width = self.WIDTH_PX
-        self.height = self.HEIGHT_PX if show_overscan else self.VISIBLE_HEIGHT_PX
+        self.width = self.WIDTH_PX if horizontal_overscan else self.VISIBLE_WIDTH_PX
+        self.height = self.HEIGHT_PX if vertical_overscan else self.VISIBLE_HEIGHT_PX
         self.scale = scale
-        self.show_overscan = show_overscan
+        self.vertical_overscan = vertical_overscan
+        self.horizontal_overscan = horizontal_overscan
 
         self._text_buffer = []
 
@@ -46,19 +42,23 @@ class Screen(ScreenBase):
     PyGame based screen.
     Keep all PyGame-specific stuff in here (don't want PyGame specific stuff all over the rest of the code)
     """
-    def __init__(self, ppu, scale=3, vsync=False, show_overscan=False, nametable_panel=False):
-        super().__init__(ppu, scale, show_overscan)
+    def __init__(self, ppu, scale=3, vsync=False, vertical_overscan=False, horizontal_overscan=False, nametable_panel=False):
+        super().__init__(ppu, scale, vertical_overscan, horizontal_overscan)
 
         self.nametable_panel = nametable_panel
 
         if nametable_panel:
+            # if including the nametable panel, make a buffer for it
             self.nt_buffer_surf = pygame.Surface((32 * 8 * 2, 30 * 8 * 2))
 
         # screens and buffers
         self.buffer_surf = pygame.Surface((self.width, self.height))
+
+        # todo: this introduces a dependency on NumPy, so we might want to refactor to remove that
         self.buffer_sa = pygame.surfarray.pixels2d(self.buffer_surf)
 
         if nametable_panel:
+            # if including the nametable panel, make the window large enough to show it
             scr_width = self.width * self.scale + 32 * 8 * 2
             scr_height = max(self.height * self.scale, 30 * 8 * 2)
         else:
@@ -79,9 +79,8 @@ class Screen(ScreenBase):
             self.font.render_to(surf, (position[0] * self.scale, position[1] * self.scale), text, color)
 
     def show(self):
-        self.ppu.copy_screen_buffer_to(self.buffer_sa, self.show_overscan)
+        self.ppu.copy_screen_buffer_to(self.buffer_sa, self.vertical_overscan, self.horizontal_overscan)
         if self.nametable_panel:
-            #self.nt_buffer_surf.fill((0, 0, 0))
             self.ppu.debug_render_nametables(pygame.surfarray.pixels2d(self.nt_buffer_surf))
             scaled = pygame.transform.scale(self.buffer_surf, (self.width * self.scale, self.height * self.scale))
             self.screen.blit(scaled, (0,0))
@@ -91,8 +90,6 @@ class Screen(ScreenBase):
         self._render_text(self.screen)
         pygame.display.flip()
         self.update_text()
-
-
 
     def clear(self, color=(0, 0, 0)):
         self.buffer_surf.fill(color)
@@ -104,13 +101,16 @@ class ScreenGL(ScreenBase):
     Keep all PyGame-specific stuff in here (don't want PyGame specific stuff all over the rest of the code)
     """
 
-    def __init__(self, ppu, scale=3, vsync=False, show_overscan=False):
-        super().__init__(ppu, scale, show_overscan)
+    def __init__(self, ppu, scale=3, vsync=False, vertical_overscan=False, horizontal_overscan=False):
+        super().__init__(ppu, scale, vertical_overscan, horizontal_overscan)
 
         # screens and buffers
         self.buffer_surf = pygame.Surface((self.width, self.height))
         self.buffer_sa = pygame.surfarray.pixels2d(self.buffer_surf)
-        self.screen = pygame.display.set_mode((self.width * scale, self.height * scale), flags = pygame.DOUBLEBUF | pygame.OPENGL, vsync=vsync)
+        self.screen = pygame.display.set_mode((self.width * scale, self.height * scale),
+                                              flags = pygame.DOUBLEBUF | pygame.OPENGL,
+                                              vsync=vsync
+                                              )
 
         self.arr = bytearray([0] * (self.width * self.height * 3))
         self.gltex = None   # the texture that we will use for the screen
@@ -123,7 +123,7 @@ class ScreenGL(ScreenBase):
 
     def opengl_init(self):
         """
-        Set up all the usual OpenGL boilerplate to get going
+        Set up the OpenGL boilerplate to get going
         """
         self.gltex = glGenTextures(1)
         glViewport(0, 0, self.width * self.scale, self.height * self.scale)
@@ -141,13 +141,15 @@ class ScreenGL(ScreenBase):
         glEnable(GL_BLEND)
 
     def show_gl(self):
+        """
+        Show the screen by copying the buffer to an OpenGL texture and displaying a rectangle with that texture
+        :return:
+        """
         # prepare to render the texture-mapped rectangle
         glClear(GL_COLOR_BUFFER_BIT)
         glLoadIdentity()
         glDisable(GL_LIGHTING)
         glEnable(GL_TEXTURE_2D)
-        # glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
-        # glClearColor(0, 0, 0, 1.0)
 
         # draw texture openGL Texture
         self.surface_to_texture(self.buffer_surf)
@@ -161,6 +163,7 @@ class ScreenGL(ScreenBase):
 
     def surface_to_texture(self, pygame_surface):
         """
+        Copy a PyGame surface to an OpenGL texture.  This came from a StackOverflow answer that I sadly can't find now.
         There is probably a faster way to do this, but this works for now
         """
         rgb_surface = pygame.image.tostring(pygame_surface, 'RGB')
@@ -242,12 +245,13 @@ class ControllerBase:
         if not self.active:
             return 0
 
+        # todo: it seems like the following behviour should be correct, but it doesn't work, whereas removing this does
         #if self.strobe:
         #    self._current_bit = 0
+
         v = self.is_pressed[self._current_bit] if self._current_bit < self.NUM_BUTTONS else 1
         #logging.log(logging.DEBUG, "Controller bit {} is {}".format(self._current_bit, v), extra={"source": "cntrlr"})
-        #print("Controller read bit ({:6s}) {} is {}".format(self.NAMES[self._current_bit], self._current_bit, v))
-        self._current_bit += 1 #min((self._current_bit + 1), self.NUM_BUTTONS) # don't want this to overflow (very unlikely)
+        self._current_bit = min((self._current_bit + 1), self.NUM_BUTTONS) # don't want this to overflow (very unlikely)
         return v
 
 

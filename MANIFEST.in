@@ -1,0 +1,4 @@
+include nes/cycore/*.pxd
+include nes/cycore/*.pyx
+include LICENSE
+include README.md

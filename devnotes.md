@@ -38,7 +38,9 @@ Improvements
   * run headless without pygame, pyaudio
 * ALE sytle interface
   * Find lives, score counters, start point for a few games
-* pip installable
+* ~~pip installable~~
+  * ~~make pyaudio optional (=> no sound)~~
+  * make pygame optional (=> headless only)
 * Debug features
   * (made tricky by pygame one window limit)
   * ~~nametable viewer~~

@@ -4,20 +4,32 @@
 from .mos6502 cimport MOS6502
 from .memory cimport NESMappedRAM
 from .ppu cimport NESPPU
-from .apu cimport NESAPU
+from .apu cimport NESAPU, SAMPLE_RATE
 
 from nes.rom import ROM
 from nes.peripherals import Screen, ScreenGL, KeyboardController, ControllerBase
 from nes.utils import load_palette
 
 import logging
-
 import pygame
-import pyaudio  # unfortunately, pygame's audio handling does not do what we need with gapless playback of short samples
-
 import time
+import warnings
 
-from .apu cimport SAMPLE_RATE
+# unfortunately, pygame's audio handling does not do what we need with gapless playback of short samples
+# we therefore use pyaudio, but it would be nice to make it optional
+try:
+    import pyaudio
+    has_audio = True
+except ImportError:
+    has_audio = False
+
+# would like to know if PyOpenGL is available to avoid using OpenGL screen if not
+try:
+    import OpenGL.GL
+    has_opengl = True
+except ImportError:
+    has_opengl = False
+
 
 # custom log levels to control the amount of logging (these are mostly unused because logging is mostly disabled)
 LOG_MEMORY = 5
@@ -90,9 +102,21 @@ cdef class NES:
                  ):
         """
         Build a NES and cartridge from the bits and pieces we have lying around plus some rom data!  Also do some things
-        like set up logging, etc.
+        like set up logging, make sure the options are compatible (and warn if not) etc.
         """
-        self.sync_mode = sync_mode
+        if sync_mode == SYNC_AUDIO and not has_audio:
+            self.sync_mode = SYNC_PYGAME
+            warnings.warn("Selected sync_mode is SYNC_AUDIO, but audio is not available, probably because pyaudio is "
+                          "not available on the system")
+        else:
+            self.sync_mode = sync_mode
+
+        if opengl and not has_opengl:
+            warnings.warn("OpenGL is not available, possibly because PyOpenGL is not installed (try 'pip install "
+                          "PyOpenGL' or start with option opengl=False).  Starting with PyGame (SDL) based screen.")
+
+        if opengl and show_nametables:
+            warnings.warn("Nametable display not supported in OpenGL mode.  Use opengl=False to display.")
 
         # set up the logger
         self.init_logging(log_file, log_level)
@@ -122,7 +146,7 @@ cdef class NES:
         self.apu = NESAPU(interrupt_listener=self.interrupt_listener)
 
         # screen needs to have the PPU
-        if opengl:
+        if opengl and has_opengl:
             self.screen = ScreenGL(ppu=self.ppu,
                                  scale=screen_scale,
                                  vsync=True if sync_mode == SYNC_VSYNC else False,
@@ -167,7 +191,7 @@ cdef class NES:
         logging.DEBUG)
         """
         if log_file is None or log_level is None:
-            logging.disable()
+            logging.disable(level=logging.CRITICAL)
             return
 
         logging.addLevelName(LOG_MEMORY, "MEMORY")  # set a low level for memory logging because it is so intense
@@ -246,25 +270,28 @@ cdef class NES:
         cdef double fps, t_start=0.
         cdef bint show_hud=True, log_cpu=False, mute=False, audio_drop=False
         cdef int frame=0, frame_start=0, cpu_cycles=0, last_sound_buffer=0
+        cdef bint audio=has_audio
 
+        if not audio:
+            warnings.warn("Audio is unavailable, probably because pyaudio is not installed.")
 
-        print("Starting Emulator 2")
-
-        p = pyaudio.PyAudio()
+        if audio:
+            p = pyaudio.PyAudio()
 
         pygame.init()
         clock = pygame.time.Clock()
 
         # this has to come after pygame init for some reason, or pygame won't start :(
-        player = p.open(format=pyaudio.paInt16,
-                        channels=1,
-                        rate=SAMPLE_RATE,
-                        output=True,
-                        frames_per_buffer=AUDIO_CHUNK_SAMPLES,  # 400 is a half-frame at 60Hz, 48kHz sound
-                        stream_callback=self.apu.pyaudio_callback,
-                        )
+        if audio:
+            player = p.open(format=pyaudio.paInt16,
+                            channels=1,
+                            rate=SAMPLE_RATE,
+                            output=True,
+                            frames_per_buffer=AUDIO_CHUNK_SAMPLES,  # 400 is a half-frame at 60Hz, 48kHz sound
+                            stream_callback=self.apu.pyaudio_callback,
+                            )
+            player.start_stream()
 
-        player.start_stream()
         t_start = time.time()
 
         while True:
@@ -280,11 +307,13 @@ cdef class NES:
             #print(self.cpu.cycles_since_reset - cpu_cycles)
             cpu_cycles = self.cpu.cycles_since_reset
 
-            if time.time() - t_start > 10.0:
+            if time.time() - t_start > 1.0:
                 frame_start = frame
                 t_start = time.time()
             if show_hud:
-                self.screen.add_text("{:.0f} fps, {}Hz".format(fps, self.apu.get_rate()), (self.OSD_FPS_X, self.OSD_Y), self.OSD_TEXT_COLOR if fps > TARGET_FPS-3 else self.OSD_WARN_COLOR)
+                self.screen.add_text("{:.0f} fps, {}Hz".format(fps, self.apu.get_rate()),
+                                     (self.OSD_FPS_X, self.OSD_Y),
+                                     self.OSD_TEXT_COLOR if fps > TARGET_FPS - 3 else self.OSD_WARN_COLOR)
                 if log_cpu:
                     self.screen.add_text("logging cpu", (self.OSD_NOTE_X, self.OSD_Y), self.OSD_NOTE_COLOR)
                 if mute:
@@ -294,32 +323,37 @@ cdef class NES:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     pygame.quit()
-                    player.stop_stream()
-                    player.close()
-                    p.terminate()
+                    if audio:
+                        player.stop_stream()
+                        player.close()
+                        p.terminate()
                     return
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_1:
                         show_hud = not show_hud
                     if event.key == pygame.K_3:
-                        self.save()
-                        self.screen.add_text("saved", (self.OSD_NOTE_X, self.OSD_Y), self.OSD_NOTE_COLOR)
+                        pass
+                        #self.screen.add_text("saved", (self.OSD_NOTE_X, self.OSD_Y), self.OSD_NOTE_COLOR)
                     if event.key == pygame.K_0:
                         if not mute:
                             self.apu.set_volume(0)
                             mute = True
                         else:
                             self.apu.set_volume(volume)
-                            mute=False
+                            mute = False
                     if event.key == pygame.K_MINUS:
                         volume = max(0, volume - 0.1)
                         self.apu.set_volume(volume)
-                        self.screen.add_text("volume: " + "|" * int(10 * volume), (self.OSD_VOL_X, self.OSD_Y), self.OSD_TEXT_COLOR, ttl=30)
+                        self.screen.add_text("volume: " + "|" * int(10 * volume),
+                                             (self.OSD_VOL_X, self.OSD_Y),
+                                             self.OSD_TEXT_COLOR, ttl=30)
                         mute=False
                     if event.key == pygame.K_EQUALS:
                         volume = min(1, volume + 0.1)
                         self.apu.set_volume(volume)
-                        self.screen.add_text("volume: " + "|" * int(10 * volume), (self.OSD_VOL_X, self.OSD_Y), self.OSD_TEXT_COLOR, ttl=30)
+                        self.screen.add_text("volume: " + "|" * int(10 * volume),
+                                             (self.OSD_VOL_X, self.OSD_Y),
+                                             self.OSD_TEXT_COLOR, ttl=30)
                         mute=False
                     if event.key == pygame.K_2:
                         log_cpu = not log_cpu
@@ -329,11 +363,11 @@ cdef class NES:
 
             if self.sync_mode == SYNC_AUDIO:
                 # wait for the audio buffer to empty, but only if the audio is playing
-                while self.apu.buffer_remaining() > MIN_AUDIO_BUFFER_SAMPLES and player.is_active():
+                while self.apu.buffer_remaining() > MIN_AUDIO_BUFFER_SAMPLES and audio and player.is_active():
                     clock.tick(500)  # wait for about 2ms (~= 96 samples)
             elif self.sync_mode == SYNC_VSYNC or self.sync_mode == SYNC_PYGAME:
                 # here we rely on an external sync source, but allow the audio to adapt to it
-                if frame > 20:
+                if audio and frame > 20:
                     if self.apu.buffer_remaining() > MIN_AUDIO_BUFFER_SAMPLES:
                         # if the rate is elevated and the sound buffer is growing, try reducing the rate
                         if self.apu.get_rate() > SAMPLE_RATE:
@@ -350,7 +384,11 @@ cdef class NES:
                 # if we are using pygame sync, we have to supply our own clock tick here
                 clock.tick(TARGET_FPS)
 
-            if not player.is_active() and self.apu.buffer_remaining() > MIN_AUDIO_BUFFER_SAMPLES and (frame % 10 == 0):
+            if (audio
+                and not player.is_active()
+                and self.apu.buffer_remaining() > MIN_AUDIO_BUFFER_SAMPLES
+                and (frame % 10 == 0)
+                ):
                 # try to (re)start the stream if it is not running if there is audio waiting
                 #print("audio dropped, attempting restart")
                 audio_drop=True

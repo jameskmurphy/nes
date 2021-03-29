@@ -1,15 +1,9 @@
 from collections import namedtuple
 from enum import Enum
 
-Instruction = namedtuple("Instruction",
-                         ["bytecode", "size_bytes", "cycles", "name", "mode", "function"],
-                         defaults = [None, None, None, None, None, None]
-                         )
-
-InstructionSet = namedtuple("InstructionSet",
-                            ["name", "modes"],
-                            defaults=[None, None]
-                            )
+Instruction = namedtuple("Instruction", ["bytecode", "size_bytes", "cycles"])
+NamedInstruction = namedtuple("NamedInstruction", ["bytecode", "size_bytes", "cycles", "name", "mode"])
+InstructionSet = namedtuple("InstructionSet", ["name", "modes"])
 
 
 class AddressModes(Enum):

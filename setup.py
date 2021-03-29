@@ -1,24 +1,28 @@
-import setuptools
+from setuptools import setup, Extension, find_packages
 from Cython.Build import cythonize
+
+extensions = [Extension("cycore.*", ["nes/cycore/*.pyx"])]
+extensions = cythonize(extensions, compiler_directives={"language_level": 3})
 
 with open("README.md", "r") as fh:
     long_description = fh.read()
 
-setuptools.setup(
+setup(
     name="pyntendo",
-    version="0.0.1",
+    version="0.0.6",
     author="James Murphy",
     author_email="jkmurphy314@gmail.com",
     description="A Nintendo Entertainment System (NES) emulator in Python and Cython",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/jameskmurphy/nes",
-    packages=setuptools.find_packages(),
+    packages=find_packages(),
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
     ],
     python_requires='>=3.6',
-    ext_modules = cythonize("nes/cycore/*.pyx")
+    #ext_modules = cythonize("nes/cycore/*.pyx")
+    ext_modules = extensions
 )

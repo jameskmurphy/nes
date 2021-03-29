@@ -3,7 +3,11 @@ import logging
 import pygame
 import pygame.freetype
 
-from OpenGL.GL import *
+try:
+    from OpenGL.GL import *
+    has_opengl = True
+except ImportError:
+    has_opengl = False
 
 class ScreenBase:
     """
@@ -40,7 +44,7 @@ class ScreenBase:
 class Screen(ScreenBase):
     """
     PyGame based screen.
-    Keep all PyGame-specific stuff in here (don't want PyGame specific stuff all over the rest of the code)
+    Keep PyGame-specific stuff in here (don't want PyGame specific stuff all over the rest of the code)
     """
     def __init__(self, ppu, scale=3, vsync=False, vertical_overscan=False, horizontal_overscan=False, nametable_panel=False):
         super().__init__(ppu, scale, vertical_overscan, horizontal_overscan)
@@ -72,7 +76,7 @@ class Screen(ScreenBase):
         self.font = pygame.freetype.SysFont(pygame.font.get_default_font(), 12 * self.scale)
 
     def add_text(self, text, position, color, ttl=1):
-        self._text_buffer.append((text, (position[0] * self.scale, position[1] * self.scale), color, ttl))
+        self._text_buffer.append((text, (position[0], position[1]), color, ttl))
 
     def _render_text(self, surf):
         for (text, position, color, _) in self._text_buffer:
@@ -98,7 +102,8 @@ class Screen(ScreenBase):
 class ScreenGL(ScreenBase):
     """
     PyGame / OpenGL based screen.
-    Keep all PyGame-specific stuff in here (don't want PyGame specific stuff all over the rest of the code)
+    Keep *all* OpenGL-specific stuff in here
+    Keep PyGame-specific stuff in here (don't want PyGame specific stuff all over the rest of the code)
     """
 
     def __init__(self, ppu, scale=3, vsync=False, vertical_overscan=False, horizontal_overscan=False):
@@ -258,6 +263,7 @@ class ControllerBase:
 class KeyboardController(ControllerBase):
     """
     PyGame keyboard-based controller
+    Keep PyGame specific stuff in here
     """
     DEFAULT_KEY_MAP = {
         pygame.K_w: ControllerBase.UP,

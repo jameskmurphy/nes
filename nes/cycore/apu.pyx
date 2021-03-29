@@ -2,7 +2,11 @@
 #import pyximport; pyximport.install()
 
 from .bitwise cimport bit_high
-import pyaudio
+try:
+    import pyaudio
+    has_audio = False
+except ImportError:
+    has_audio = True
 
 from .system cimport DMC_DMA
 

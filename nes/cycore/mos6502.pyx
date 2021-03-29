@@ -1,13 +1,13 @@
 # cython: profile=True, boundscheck=True, nonecheck=False, language_level=3
 #import pyximport; pyximport.install()
 
-
 from .system cimport OAM_DMA, DMC_DMA, DMC_DMA_DURING_OAM_DMA
-from nes.instructions import INSTRUCTION_SET, Instruction, AddressModes
+from nes.instructions import INSTRUCTION_SET, NamedInstruction, AddressModes
 
 cdef class MOS6502:
     """
-    Software emulator for MOS Technologies 6502 CPU
+    Software emulator for MOS Technologies 6502 CPU.  The chip in the NES is a modified version of the 6502 that does
+    not support BCD mode (which makes it a bit simpler).
 
     References:
        [1] https://www.masswerk.at/6502/6502_instruction_set.html
@@ -131,22 +131,19 @@ cdef class MOS6502:
                     # some of the undocumented opcodes have multiple aliases, so in that case a list of
                     # opcodes is supplied
                     for bytecode in instr.bytecode:
-                        instructions[bytecode] = Instruction(name=instr_set.name,
-                                                             bytecode=bytecode,
-                                                             mode=mode,
-                                                             size_bytes=instr.size_bytes,
-                                                             cycles=instr.cycles,
-                                                             function=None#getattr(self, "_{}".format(instr_set.name)),
-                                                             )
-
+                        instructions[bytecode] = NamedInstruction(name=instr_set.name,
+                                                                  bytecode=bytecode,
+                                                                  mode=mode,
+                                                                  size_bytes=instr.size_bytes,
+                                                                  cycles=instr.cycles,
+                                                                 )
                 else:
-                    instructions[instr.bytecode] = Instruction(name=instr_set.name,
-                                                               bytecode=instr.bytecode,
-                                                               mode=mode,
-                                                               size_bytes=instr.size_bytes,
-                                                               cycles=instr.cycles,
-                                                               function=None#getattr(self, "_{}".format(instr_set.name)),
-                                                               )
+                    instructions[instr.bytecode] = NamedInstruction(name=instr_set.name,
+                                                                    bytecode=instr.bytecode,
+                                                                    mode=mode,
+                                                                    size_bytes=instr.size_bytes,
+                                                                    cycles=instr.cycles,
+                                                                   )
         return instructions
 
     cdef void make_instruction_data_tables(self):
@@ -161,6 +158,9 @@ cdef class MOS6502:
                     self.instr_size_bytes[bytecode] = instr.size_bytes
 
     def format_instruction(self, instr, data, caps=True):
+        """
+        Formats an instruction for logline in the form of nestest logs
+        """
         line = ""
         name = instr.name if not caps else instr.name.upper()
         line += '{} '.format(name)
@@ -213,16 +213,15 @@ cdef class MOS6502:
             str += " "
 
         str += "A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X} PPU:{},{} CYC:{:d}".format(self.A,
-                                                                                           self.X,
-                                                                                           self.Y,
-                                                                                           self._status_to_byte(b_flag=0),
-                                                                                           self.SP,
-                                                                                           ppu_line,
-                                                                                           ppu_pixel,
-                                                                                           self.cycles_since_reset
-                                                                                           )
+                                                                                         self.X,
+                                                                                         self.Y,
+                                                                                         self._status_to_byte(b_flag=0),
+                                                                                         self.SP,
+                                                                                         ppu_line,
+                                                                                         ppu_pixel,
+                                                                                         self.cycles_since_reset
+                                                                                        )
         return str
-
 
     def set_reset_vector(self, reset_vector):
         """
@@ -383,12 +382,11 @@ cdef class MOS6502:
         result = self.A + v + self.C
         self.C = result > 255
         self.V = (self._neg(self.A) == self._neg(v)) and (self._neg(self.A) != self._neg(result))
-        self._set_zn(result)
 
         # status
         # setting N and Z flags in the usual way is valid in BCD mode because "the N flag contains the high bit of
-        # the result of the instruction" [5]
-
+        # the result of the instruction" [5] (having said that, BCD mode is removed on the NES)
+        self._set_zn(result)
 
         # result
         self.A = result & 0xFF

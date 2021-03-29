@@ -1,4 +1,6 @@
-# NES-PY
+# Pyntendo
+
+    pip install pyntendo
 
 A Nintendo Entertainment System (NES) emulator written in Python and Cython.  Currently in development.  All
 core components are implemented, although several important mappers are still to do and known bugs remain (along
@@ -13,11 +15,9 @@ Super Mario Brothers:
 
 ![Mario](/img/mario.png)
 
-
 Donkey Kong:
 
 ![DonkeyKong](/img/donkeykong.png)
-
 
 MegaMan:
 
@@ -27,22 +27,22 @@ MegaMan:
 
 Basic usage:
 
-    from nes.cycore.system import NES
-    nes = NES([rom_filename])
+    from nes import NES
+    nes = NES("my_rom.nes")
     nes.run()
 
 
 ### Dependencies
 
 Depends on the following libraries for key functionality:
-* pygame
+* required: pygame
   * timing
   * rendering
   * input
-* pyaudio
+* (optional: pyaudio)
   * audio playing
   * sync to audio
-* (pyopengl)
+* (optional: pyopengl)
   * OpenGL rendering
   * (not essential; can use SDL rendering via pygame)
 

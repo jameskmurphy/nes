@@ -33,18 +33,11 @@ Basic usage:
 
 ### Screenshots
 
-Here are some screenshots of the emulator in action: Super Mario Brothers, Donkey Kong, MegaMan<br/>
+Here are some screenshots of the emulator in action: Super Mario Brothers, Donkey Kong, MegaMan
 
-<div>
-<img src="/img/mario.png" align="left" height="300">
-<img src="/img/donkeykong.png" align="left" height="300">
-
-
-<br/>
-<img src="/img/megaman.png" align="left" height="300">
-
-<br/>
-</div>
+<img src="/img/mario.png" height="300">
+<img src="/img/donkeykong.png" height="300">
+<img src="/img/megaman.png" height="300">
 
 ### Dependencies
 

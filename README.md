@@ -33,17 +33,11 @@ Basic usage:
 
 ### Screenshots
 
-Here are some screenshots of the emulator in action:
-
-Super Mario Brothers:
+Here are some screenshots of the emulator in action: Super Mario Brothers, Donkey Kong, MegaMan<br/>
 <img src="/img/mario.png" align="left" height="300">
-
-Donkey Kong:
 <img src="/img/donkeykong.png" align="left" height="300">
-
-MegaMan:
 <img src="/img/megaman.png" align="left" height="300">
-
+<br/>
 
 ### Dependencies
 

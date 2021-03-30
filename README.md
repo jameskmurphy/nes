@@ -33,19 +33,16 @@ Basic usage:
 
 ### Screenshots
 
-Here are some screenshots of the emulator in action!
+Here are some screenshots of the emulator in action:
 
 Super Mario Brothers:
-
-![Mario](/img/mario.png =400x)
+<img src="/img/mario.png" align="left" height="300">
 
 Donkey Kong:
-
-![DonkeyKong](/img/donkeykong.png =400x)
+<img src="/img/donkeykong.png" align="left" height="300">
 
 MegaMan:
-
-![MegaMan](/img/megaman.png =400x)
+<img src="/img/megaman.png" align="left" height="300">
 
 
 ### Dependencies

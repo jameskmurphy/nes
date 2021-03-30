@@ -11,7 +11,6 @@ from nes.peripherals import Screen, ScreenGL, KeyboardController, ControllerBase
 from nes.utils import load_palette
 
 import logging
-import pygame
 import time
 import warnings
 
@@ -23,12 +22,27 @@ try:
 except ImportError:
     has_audio = False
 
+# would like to make this not depend on pygame
+try:
+    import pygame
+    has_pygame = True
+except ImportError:
+    has_pygame = False
+
 # would like to know if PyOpenGL is available to avoid using OpenGL screen if not
 try:
     import OpenGL.GL
     has_opengl = True
 except ImportError:
     has_opengl = False
+
+# only use numpy for return of frame during headless operation, so don't depend on this in general
+try:
+    import numpy as np
+    has_numpy = True
+except ImportError:
+    has_numpy = False
+
 
 
 # custom log levels to control the amount of logging (these are mostly unused because logging is mostly disabled)
@@ -87,6 +101,8 @@ cdef class NES:
     OSD_NOTE_COLOR = (255, 128, 0)
     OSD_WARN_COLOR = (255, 0, 0)
 
+    STATS_CALC_PERIOD_S = 1.0        # how often to calculate the adaptive audio rate and fps counter
+
     def __init__(self,
                  rom_file,                  # the rom file to load
                  screen_scale=3,            # factor by which to scale the screen
@@ -99,6 +115,7 @@ cdef class NES:
                  vertical_overscan=False,   # show the top and bottom 8 pixels (not usually visible on CRT TVs)
                  horizontal_overscan=False, # show the left and right 8 pixels (often not visible on CRT TVs)
                  palette_file=None,         # supply a palette file to use; None gives default
+                 headless=False,            # runs the nes in headless mode without the pygame screen being started
                  ):
         """
         Build a NES and cartridge from the bits and pieces we have lying around plus some rom data!  Also do some things
@@ -118,6 +135,10 @@ cdef class NES:
         if opengl and show_nametables:
             warnings.warn("Nametable display not supported in OpenGL mode.  Use opengl=False to display.")
 
+        # record overscan preference
+        self.h_overscan = horizontal_overscan
+        self.v_overscan = vertical_overscan
+
         # set up the logger
         self.init_logging(log_file, log_level)
 
@@ -132,8 +153,11 @@ cdef class NES:
         self.cart = rom.get_cart(self.interrupt_listener)
 
         # game controllers have no dependencies
-        self.controller1 = KeyboardController()
-        self.controller2 = ControllerBase(active=False)   # connect a second gamepad, but make it inactive for now
+        if has_pygame:
+            self.controller1 = KeyboardController()
+        else:
+            self.controller1 = ControllerBase(active=True)
+        self.controller2 = ControllerBase(active=True)   # connect a second gamepad, but make it inactive for now
 
         # load the requested palette
         if palette_file is not None:
@@ -146,21 +170,24 @@ cdef class NES:
         self.apu = NESAPU(interrupt_listener=self.interrupt_listener)
 
         # screen needs to have the PPU
-        if opengl and has_opengl:
-            self.screen = ScreenGL(ppu=self.ppu,
-                                 scale=screen_scale,
-                                 vsync=True if sync_mode == SYNC_VSYNC else False,
-                                 vertical_overscan=vertical_overscan,
-                                 horizontal_overscan=horizontal_overscan
-                                 )
+        if has_pygame and not headless:
+            if opengl and has_opengl:
+                self.screen = ScreenGL(ppu=self.ppu,
+                                       scale=screen_scale,
+                                       vsync=True if sync_mode == SYNC_VSYNC else False,
+                                       vertical_overscan=vertical_overscan,
+                                       horizontal_overscan=horizontal_overscan
+                                      )
+            else:
+                self.screen = Screen(ppu=self.ppu,
+                                     scale=screen_scale,
+                                     vsync=True if sync_mode == SYNC_VSYNC else False,
+                                     nametable_panel=show_nametables,
+                                     vertical_overscan=vertical_overscan,
+                                     horizontal_overscan=horizontal_overscan
+                                    )
         else:
-            self.screen = Screen(ppu=self.ppu,
-                                 scale=screen_scale,
-                                 vsync=True if sync_mode == SYNC_VSYNC else False,
-                                 nametable_panel=show_nametables,
-                                 vertical_overscan=vertical_overscan,
-                                 horizontal_overscan=horizontal_overscan
-                                 )
+            self.screen=None
 
         self.screen_scale = screen_scale
 
@@ -211,7 +238,6 @@ cdef class NES:
         PPU (three per CPU cycle, at least on NTSC systems).
         """
         cdef int cpu_cycles=0
-
         cdef bint vblank_started=False
 
         if self.interrupt_listener.any_active():
@@ -265,18 +291,20 @@ cdef class NES:
         Run the NES indefinitely (or until some quit signal); this will only exit on quit.
         There is some PyGame specific stuff in here in order to handle frame timing and checking for exits
         """
-        cdef int vblank_started
+        cdef int vblank_started=False
         cdef float volume = 0.5
-        cdef double fps, t_start=0.
+        cdef double fps, t_start=0., dt=-0.
         cdef bint show_hud=True, log_cpu=False, mute=False, audio_drop=False
-        cdef int frame=0, frame_start=0, cpu_cycles=0, last_sound_buffer=0
+        cdef int frame=0, frame_start=0, cpu_cycles=0, adaptive_rate=0, buffer_surplus=0
         cdef bint audio=has_audio
 
-        if not audio:
-            warnings.warn("Audio is unavailable, probably because pyaudio is not installed.")
+        if not has_pygame:
+            raise RuntimeError("Cannot run() without pygame; only headless operation is supported.")
 
         if audio:
             p = pyaudio.PyAudio()
+        else:
+            warnings.warn("Audio is unavailable, probably because pyaudio is not installed.")
 
         pygame.init()
         clock = pygame.time.Clock()
@@ -303,15 +331,22 @@ cdef class NES:
             self.controller1.update()
             self.controller2.update()
 
-            fps = (frame - frame_start) * 1.0 / (time.time() - t_start)
-            #print(self.cpu.cycles_since_reset - cpu_cycles)
             cpu_cycles = self.cpu.cycles_since_reset
 
-            if time.time() - t_start > 1.0:
-                frame_start = frame
+            if time.time() - t_start > self.STATS_CALC_PERIOD_S:
+                # calcualte the fps and adaptive audio rate (only used when non-audio sync is in use)
+                dt = time.time() - t_start
+                fps = (frame - frame_start) * 1.0 / dt
+                buffer_surplus = self.apu.buffer_remaining() - TARGET_AUDIO_BUFFER_SAMPLES
+
+                # adjust the rate based on the buffer change
+                adaptive_rate = int(SAMPLE_RATE - 0.5 * buffer_surplus / dt)
+                adaptive_rate = max(SAMPLE_RATE - MAX_RATE_DELTA, min(adaptive_rate, SAMPLE_RATE + MAX_RATE_DELTA))
                 t_start = time.time()
+                frame_start = frame
             if show_hud:
-                self.screen.add_text("{:.0f} fps, {}Hz".format(fps, self.apu.get_rate()),
+                # display information on the HUD (turn on/off with '1' key)
+                self.screen.add_text("{:.0f} fps, {}Hz, {} samples".format(fps, self.apu.get_rate(), self.apu.buffer_remaining()),
                                      (self.OSD_FPS_X, self.OSD_Y),
                                      self.OSD_TEXT_COLOR if fps > TARGET_FPS - 3 else self.OSD_WARN_COLOR)
                 if log_cpu:
@@ -331,9 +366,6 @@ cdef class NES:
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_1:
                         show_hud = not show_hud
-                    if event.key == pygame.K_3:
-                        pass
-                        #self.screen.add_text("saved", (self.OSD_NOTE_X, self.OSD_Y), self.OSD_NOTE_COLOR)
                     if event.key == pygame.K_0:
                         if not mute:
                             self.apu.set_volume(0)
@@ -359,23 +391,17 @@ cdef class NES:
                         log_cpu = not log_cpu
 
 
+            # show the display (if using SYNC_VSYNC mode, this should provide a sync, which must be at 60Hz)
             self.screen.show()
 
             if self.sync_mode == SYNC_AUDIO:
                 # wait for the audio buffer to empty, but only if the audio is playing
-                while self.apu.buffer_remaining() > MIN_AUDIO_BUFFER_SAMPLES and audio and player.is_active():
-                    clock.tick(500)  # wait for about 2ms (~= 96 samples)
+                while self.apu.buffer_remaining() > TARGET_AUDIO_BUFFER_SAMPLES and audio and player.is_active():
+                    clock.tick(framerate=500)  # wait for about 2ms (~= 96 samples)
             elif self.sync_mode == SYNC_VSYNC or self.sync_mode == SYNC_PYGAME:
                 # here we rely on an external sync source, but allow the audio to adapt to it
-                if audio and frame > 20:
-                    if self.apu.buffer_remaining() > MIN_AUDIO_BUFFER_SAMPLES:
-                        # if the rate is elevated and the sound buffer is growing, try reducing the rate
-                        if self.apu.get_rate() > SAMPLE_RATE:
-                            self.apu.set_rate(self.apu.get_rate() - 48)
-                    elif (self.apu.buffer_remaining() < MIN_AUDIO_BUFFER_SAMPLES) and self.apu.get_rate() < SAMPLE_RATE + 10000:
-                        self.apu.set_rate(self.apu.get_rate() + 48)
-
-                    last_sound_buffer = self.apu.buffer_remaining()
+                if frame > 2 * TARGET_FPS:  # wait a bit before doing this since startup can be slow
+                    self.apu.set_rate(adaptive_rate)
             else:
                 # no sync at all, go as fast as we can!
                 pass
@@ -386,11 +412,11 @@ cdef class NES:
 
             if (audio
                 and not player.is_active()
-                and self.apu.buffer_remaining() > MIN_AUDIO_BUFFER_SAMPLES
+                and self.apu.buffer_remaining() > TARGET_AUDIO_BUFFER_SAMPLES
                 and (frame % 10 == 0)
                 ):
-                # try to (re)start the stream if it is not running if there is audio waiting
-                #print("audio dropped, attempting restart")
+                # sometimes the audio stream stops (e.g. if it runs out of samples) and has to be restarted or else the
+                # sound will stop.  Here try to (re)start the stream if it is not running if there is audio waiting.
                 audio_drop=True
                 player.stop_stream()
                 player.close()
@@ -407,10 +433,41 @@ cdef class NES:
 
             frame += 1
 
-    cpdef void run_frame_headless(self):
-        vblank_started=False
-        while not vblank_started:
-            vblank_started = self.step(log_cpu=False)
+    cpdef object run_frame_headless(self, int run_frames=1, object controller1_state=[False] * 8, object controller2_state=[False] * 8):
+        """
+        Runs a single frame of the emulator and returns an array containing the screen output.
+        :param run_frames: number of frames to run; controller will be in same state for all frames
+        :param controller1_state: controller1 state as an array in order A, B, select, start, up, down, left, right
+        :param controller2_state: controller2 state as an array in order A, B, select, start, up, down, left, right
+        :return:
+        """
+        cdef int w, h, frame
+        cdef bint vblank_started
+
+        h = 240 if self.v_overscan else 224
+        w = 256 if self.h_overscan else 240
+        buffer = np.zeros((w, h), dtype=np.uint32)
+        cdef unsigned int [:, :] buffer_mv = buffer
+
+        # set the controller state (same for all frames)
+        self.controller1.set_state(controller1_state)
+        self.controller2.set_state(controller2_state)
+
+        frame = 0
+        while frame < run_frames:
+            vblank_started=False
+            while not vblank_started:
+                vblank_started = self.step(log_cpu=False)
+            frame += 1
+
+        self.ppu.copy_screen_buffer_to(buffer_mv, v_overscan=self.v_overscan, h_overscan=self.h_overscan)
+
+        # converts to an RGB buffer with one channel per color
+        buffer_rgb = buffer.view(dtype=np.uint8).reshape((w, h, 4))[:, :, np.array([2, 1, 0])].swapaxes(0, 1)
+        return buffer_rgb
+
+
+
 
 
 

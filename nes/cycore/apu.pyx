@@ -537,7 +537,7 @@ cdef class NESAPU:
 
         # sound output buffer (this is a ring buffer, so these variables track the current start and end position)
         self._buffer_start = 0
-        self._buffer_end = 2000  # give it some bonus sound to start with
+        self._buffer_end = 1600  # give it some bonus sound to start with
 
         self.master_volume = master_volume
         self.mode = FOUR_STEP

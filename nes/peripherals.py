@@ -1,7 +1,12 @@
 import logging
 
-import pygame
-import pygame.freetype
+# would like to make this not depend on pygame
+try:
+    import pygame
+    import pygame.freetype
+    has_pygame = True
+except ImportError:
+    has_pygame = False
 
 try:
     from OpenGL.GL import *
@@ -216,9 +221,8 @@ class ControllerBase:
     LEFT = 6
     RIGHT = 7
 
-    NAMES = ['A', 'B', 'select', 'start', 'up', 'down', 'left', 'right']
-
     NUM_BUTTONS = 8
+    NAMES = ['A', 'B', 'select', 'start', 'up', 'down', 'left', 'right']
 
     def __init__(self, active=True):
         self.is_pressed = [0] * 8   # array to store key status
@@ -228,6 +232,20 @@ class ControllerBase:
 
     def update(self):
         pass
+
+    def set_state(self, state):
+        """
+        Sets the controller state from a length-8 array of boolean values.  Set this way to support any type of array as
+        input state.
+        """
+        self.is_pressed[self.A] = state[self.A]
+        self.is_pressed[self.B] = state[self.B]
+        self.is_pressed[self.SELECT] = state[self.SELECT]
+        self.is_pressed[self.START] = state[self.START]
+        self.is_pressed[self.UP] = state[self.UP]
+        self.is_pressed[self.DOWN] = state[self.DOWN]
+        self.is_pressed[self.LEFT] = state[self.LEFT]
+        self.is_pressed[self.RIGHT] = state[self.RIGHT]
 
     def set_strobe(self, value):
         """
@@ -265,20 +283,25 @@ class KeyboardController(ControllerBase):
     PyGame keyboard-based controller
     Keep PyGame specific stuff in here
     """
-    DEFAULT_KEY_MAP = {
-        pygame.K_w: ControllerBase.UP,
-        pygame.K_a: ControllerBase.LEFT,
-        pygame.K_s: ControllerBase.DOWN,
-        pygame.K_d: ControllerBase.RIGHT,
-        pygame.K_g: ControllerBase.SELECT,
-        pygame.K_h: ControllerBase.START,
-        pygame.K_l: ControllerBase.B,
-        pygame.K_p: ControllerBase.A,
-    }
-
-    def __init__(self, active=True, key_map=DEFAULT_KEY_MAP):
+    def __init__(self, active=True, key_map=None):
         super().__init__(active=active)
-        self.key_map = key_map
+        self.key_map = key_map if key_map is not None else self._default_key_map()
+
+    def _default_key_map(self):
+        """
+        Make a default key map; done this way to avoid using pygame in a class-level constant, which causes an error
+        if pygame is not available.
+        """
+        return {
+            pygame.K_w: ControllerBase.UP,
+            pygame.K_a: ControllerBase.LEFT,
+            pygame.K_s: ControllerBase.DOWN,
+            pygame.K_d: ControllerBase.RIGHT,
+            pygame.K_g: ControllerBase.SELECT,
+            pygame.K_h: ControllerBase.START,
+            pygame.K_l: ControllerBase.B,
+            pygame.K_p: ControllerBase.A,
+        }
 
     def update(self):
         """

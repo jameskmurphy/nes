@@ -28,8 +28,9 @@ cdef class InterruptListener:
 
 cdef enum:
     PPU_CYCLES_PER_CPU_CYCLE = 3
-    MIN_AUDIO_BUFFER_SAMPLES = 1800   # increase this if you get frequent audio glitches, decrease if sound is laggy
+    TARGET_AUDIO_BUFFER_SAMPLES = 2400   # increase this if you get frequent audio glitches, decrease if sound is laggy
     AUDIO_CHUNK_SAMPLES = 400         # how many audio samples go over in each chunk, a frame has 800 samples at 48kHz
+    MAX_RATE_DELTA = 3000               # maximum deviation of sample rate +/- from target rate when adaptive
     TARGET_FPS = 60                   # system's target framerate (NTSC)
 
     # sync modes that are available, each with advantages and disadvantages
@@ -53,7 +54,8 @@ cdef class NES:
         object screen
 
         int screen_scale, sync_mode
+        bint v_overscan, h_overscan
 
     cdef int step(self, int log_cpu)
     cpdef void run(self)
-    cpdef void run_frame_headless(self)
+    cpdef object run_frame_headless(self, int run_frames=?, object controller1_state=?, object controller2_state=?)

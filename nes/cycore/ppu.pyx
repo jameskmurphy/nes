@@ -269,8 +269,6 @@ cdef class NESPPU:
         cdef int p0[4]
         self.decode_palette(p0, 0, False)
         return self.hex_palette[p0[0]]
-        #return (self.rgb_palette[p0[0]][0] << 16) + (self.rgb_palette[p0[0]][1] << 8) + self.rgb_palette[p0[0]][2]
-        #self.bkg_color = cc
 
     cdef void _clear_to_bkg(self):
         """

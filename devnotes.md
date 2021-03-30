@@ -24,7 +24,7 @@ Corrections
 
 ### Bad Behaviour
 
-* A bit short (about 50) of CPU cycles per cycle.  Why?
+* A bit short (about 50) of CPU cycles per cycle.
 
 
 Improvements
@@ -35,7 +35,6 @@ Improvements
 * Fully headless operation
   * take input keypresses
   * output frame bitmap, audio
-  * run headless without pygame, pyaudio
 * ALE sytle interface
   * Find lives, score counters, start point for a few games
 * ~~pip installable~~
@@ -98,13 +97,6 @@ Improvements
     appropriate devices each cycle) and then let the devices/cpu take care of clearing the flags?
 * Change OAM DMA handling to cycle-timed
   * this will allow more accurate handling of DMC DMA pauses and can remove some complexity from APU run_cycles
-* Screen
-  * nicer OSD
-  * more efficient copy to texture for OGL mode?
-* Fine timing details
-  * can some of these be improved?
-  * vsync length
-  * frame length
 * PPU Details
   * Colours boost if ppu_mask bits set (https://wiki.nesdev.com/w/index.php/Colour_emphasis)
   * implement sprite overflow incorrect behaviour
@@ -114,6 +106,11 @@ Improvements
   * including controllers
 * Check IRQ implementation works
   * is used in a few places on the NES:  https://wiki.nesdev.com/w/index.php/IRQ
+* Fine timing details
+  * can some of these be improved?
+  * vsync length
+  * frame length
+
 
 
 ### Minor Todo

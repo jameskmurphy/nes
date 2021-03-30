@@ -2,26 +2,26 @@
 
     pip install pyntendo
 
-A Nintendo Entertainment System (NES) emulator written in Python and Cython.  Currently in development.  All
-core components are implemented, although several important mappers are still to do and known bugs remain (along
-with lots of unknown ones!).
+A Nintendo Entertainment System (NES) emulator written in Python and Cython.
+* All core components are implemented, including audio, and the most important mappers.
+* Performant (runs at 60fps on modern machines)
+* Fully headless operation is supported
+  * NumPy-based input/output
+  * Very limited external dependencies (really just NumPy)
+  * See [Headless Demo](Headless%20Demo.ipynb) for a minimal example
+* Pure Python/Cython, fully compatible with CPython (>3.6)
 
-With huge thanks to everyone who contributed to the amazing [NESDev Wiki](wiki.nesdev.com) and all the other fantastic
-sources, tests and forums for NES emulator development and 6502 progamming.
+Although most games I have tested seem to run without issues, there are still some open issues that would improve
+performance and accuracy and probably make some hard to emulate games work or work better.
+* Several popular(ish) mappers are not implemented (along with lots of less popular ones)
+* Some fine timing is not quite right, which might cause issues in some sensitive games
+* This is not a cycle-accurate emulator, so sub-instruction level timing is not correctly emulated, and some parts of
+  other systems are not emulated in a cycle-correct way
+* See my [devnotes](devnotes.md) for known issues and planned work
 
-### Screenshots
-
-Super Mario Brothers:
-
-![Mario](/img/mario.png)
-
-Donkey Kong:
-
-![DonkeyKong](/img/donkeykong.png)
-
-MegaMan:
-
-![MegaMan](/img/megaman.png)
+I would like to give huge thanks and kudos to everyone who contributed to the amazing [NESDev Wiki](wiki.nesdev.com)
+and all the other fantastic sources (most listed in the code), tests and forums for NES emulator development and 6502
+progamming.  Without these resources it would have been impossible to develop this emulator.
 
 ### Usage
 
@@ -31,27 +31,40 @@ Basic usage:
     nes = NES("my_rom.nes")
     nes.run()
 
+### Screenshots
+
+Here are some screenshots of the emulator in action!
+
+Super Mario Brothers:
+
+![Mario](/img/mario.png =400x)
+
+Donkey Kong:
+
+![DonkeyKong](/img/donkeykong.png =400x)
+
+MegaMan:
+
+![MegaMan](/img/megaman.png =400x)
+
 
 ### Dependencies
 
 Depends on the following libraries for key functionality:
-* required: pygame
+* numpy (optional?)
+  * headless operation
+  * (possibly also required by pygame surfarray, used in rendering)
+* pygame (optional)
   * timing
   * rendering
   * input
-* (optional: pyaudio)
+  * (without pygame, only headless operation is possible)
+* pyaudio (optional)
   * audio playing
   * sync to audio
-* (optional: pyopengl)
+* pyopengl (optional)
   * OpenGL rendering
   * (not essential; can use SDL rendering via pygame)
-
-
-### Development Notes
-
-Development notes, including current known errors and todo lists (i.e. unimplemented features)
-are [here](devnotes.md).
-
 
 ### License
 

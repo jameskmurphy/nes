@@ -1,8 +1,8 @@
 import logging
 
-from .instructions import INSTRUCTION_SET, Instruction, AddressModes
+from nes.instructions import INSTRUCTION_SET, PyNamedInstruction, AddressModes
 
-from nes import LOG_CPU
+#from nes import LOG_CPU
 
 class MOS6502:
     """
@@ -141,7 +141,7 @@ class MOS6502:
                     # some of the undocumented opcodes have multiple aliases, so in that case a list of
                     # opcodes is supplied
                     for bytecode in instr.bytecode:
-                        instructions[bytecode] = Instruction(name=instr_set.name,
+                        instructions[bytecode] = PyNamedInstruction(name=instr_set.name,
                                                              bytecode=bytecode,
                                                              mode=mode,
                                                              size_bytes=instr.size_bytes,
@@ -150,7 +150,7 @@ class MOS6502:
                                                              )
 
                 else:
-                    instructions[instr.bytecode] = Instruction(name=instr_set.name,
+                    instructions[instr.bytecode] = PyNamedInstruction(name=instr_set.name,
                                                                bytecode=instr.bytecode,
                                                                mode=mode,
                                                                size_bytes=instr.size_bytes,

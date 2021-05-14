@@ -3,6 +3,7 @@ from enum import Enum
 
 Instruction = namedtuple("Instruction", ["bytecode", "size_bytes", "cycles"])
 NamedInstruction = namedtuple("NamedInstruction", ["bytecode", "size_bytes", "cycles", "name", "mode"])
+PyNamedInstruction = namedtuple("NamedInstruction", ["bytecode", "size_bytes", "cycles", "name", "mode", "function"])
 InstructionSet = namedtuple("InstructionSet", ["name", "modes"])
 
 

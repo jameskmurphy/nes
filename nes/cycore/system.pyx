@@ -1,4 +1,3 @@
-# cython: profile=True, boundscheck=True, nonecheck=False, language_level=3
 # import pyximport; pyximport.install()
 
 from .mos6502 cimport MOS6502
@@ -397,7 +396,7 @@ cdef class NES:
             if self.sync_mode == SYNC_AUDIO:
                 # wait for the audio buffer to empty, but only if the audio is playing
                 while self.apu.buffer_remaining() > TARGET_AUDIO_BUFFER_SAMPLES and audio and player.is_active():
-                    clock.tick(framerate=500)  # wait for about 2ms (~= 96 samples)
+                    clock.tick(500)  # wait for about 2ms (~= 96 samples)
             elif self.sync_mode == SYNC_VSYNC or self.sync_mode == SYNC_PYGAME:
                 # here we rely on an external sync source, but allow the audio to adapt to it
                 if frame > 2 * TARGET_FPS:  # wait a bit before doing this since startup can be slow

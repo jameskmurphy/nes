@@ -51,10 +51,11 @@ class Screen(ScreenBase):
     PyGame based screen.
     Keep PyGame-specific stuff in here (don't want PyGame specific stuff all over the rest of the code)
     """
-    def __init__(self, ppu, scale=3, vsync=False, vertical_overscan=False, horizontal_overscan=False, nametable_panel=False):
+    def __init__(self, ppu, scale=3, vsync=False, vertical_overscan=False, horizontal_overscan=False, nametable_panel=False, py_compatibility_mode=False):
         super().__init__(ppu, scale, vertical_overscan, horizontal_overscan)
 
         self.nametable_panel = nametable_panel
+        self.py_compatibility_mode = py_compatibility_mode
 
         if nametable_panel:
             # if including the nametable panel, make a buffer for it
@@ -80,6 +81,10 @@ class Screen(ScreenBase):
         pygame.freetype.init()
         self.font = pygame.freetype.SysFont(pygame.font.get_default_font(), 12 * self.scale)
 
+    def write_at(self, x, y, color):
+        # only used in py_compatibility_mode
+        self.buffer_surf.set_at((x, y), color)
+
     def add_text(self, text, position, color, ttl=1):
         self._text_buffer.append((text, (position[0], position[1]), color, ttl))
 
@@ -88,7 +93,9 @@ class Screen(ScreenBase):
             self.font.render_to(surf, (position[0] * self.scale, position[1] * self.scale), text, color)
 
     def show(self):
-        self.ppu.copy_screen_buffer_to(self.buffer_sa, self.vertical_overscan, self.horizontal_overscan)
+        if not self.py_compatibility_mode:
+            # the old version of the ppu wrote directly to the screen via write_at
+            self.ppu.copy_screen_buffer_to(self.buffer_sa, self.vertical_overscan, self.horizontal_overscan)
         if self.nametable_panel:
             self.ppu.debug_render_nametables(pygame.surfarray.pixels2d(self.nt_buffer_surf))
             scaled = pygame.transform.scale(self.buffer_surf, (self.width * self.scale, self.height * self.scale))

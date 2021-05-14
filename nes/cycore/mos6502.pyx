@@ -1,4 +1,3 @@
-# cython: profile=True, boundscheck=True, nonecheck=False, language_level=3
 #import pyximport; pyximport.install()
 
 from .system cimport OAM_DMA, DMC_DMA, DMC_DMA_DURING_OAM_DMA

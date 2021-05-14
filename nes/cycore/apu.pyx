@@ -1,4 +1,3 @@
-# cython: profile=True, boundscheck=True, nonecheck=False, language_level=3
 #import pyximport; pyximport.install()
 
 from .bitwise cimport bit_high

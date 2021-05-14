@@ -3,9 +3,9 @@ import time
 
 import pyximport; pyximport.install()
 
-from .memory import NESVRAM
-from .cy.cybitwise import bit_high, bit_low, set_bit, clear_bit, set_high_byte, set_low_byte
-from nes import LOG_PPU
+from nes.pycore.memory import NESVRAM
+from nes.pycore.bitwise import bit_high, bit_low, set_bit, clear_bit, set_high_byte, set_low_byte
+#from nes import LOG_PPU
 
 class NESPPU:
     """
@@ -301,7 +301,6 @@ class NESPPU:
             self.oam_addr = (self.oam_addr + 1) & 0xFF
         elif register == self.PPU_SCROLL:
             # write only
-            print("scroll write: ", value, self.line, self.pixel)
             self.ppu_scroll[self._ppu_byte_latch] = value
             # flip which byte is pointed to on each write; reset on ppu status read.  Latch shared with ppu_addr.
             self._ppu_byte_latch = 1 - self._ppu_byte_latch

@@ -1,4 +1,3 @@
-# cython: profile=True, boundscheck=True, nonecheck=False, language_level=3
 # import pyximport; pyximport.install()
 
 # important to cimport these rather than import them because that makes them have a lot less python interaction
@@ -100,7 +99,7 @@ cdef class NESPPU:
     ################ Copy OAM data #####################################################################################
 
     cdef void write_oam(self, unsigned char* data):
-        cdef int i
+        cdef int i=0
         for i in range(OAM_SIZE_BYTES):
             self.oam[i] = data[i]
 
@@ -125,7 +124,7 @@ cdef class NESPPU:
         value written to a port (including read only ones), or the last value read from a read-only port
         """
 
-        cdef unsigned char v
+        cdef unsigned char v=0
 
         if register == PPU_CTRL:
             # write only
@@ -175,7 +174,7 @@ cdef class NESPPU:
         """
         # need to store the last write because it affects the value read on ppu_status
         # "Writing any value to any PPU port, even to the nominally read-only PPUSTATUS, will fill this latch"  [6]
-        cdef int trigger_nmi, n_chng, prev_ppu_addr
+        cdef int trigger_nmi=0, n_chng=0, prev_ppu_addr=0
         value &= 0xFF  # can only write a byte here
         self._io_latch = value
 
@@ -275,7 +274,7 @@ cdef class NESPPU:
         Clears the screen buffer to the background color (which is set by palette 0)
         :return:
         """
-        cdef int cc, x, y
+        cdef int cc=0, x=0, y=0
 
         cc = self.get_background_color()
         for x in range(SCREEN_WIDTH_PX):
@@ -287,8 +286,8 @@ cdef class NESPPU:
         Copy the screen buffer to a supplied destination.  Up to the caller to ensure that the destination buffer
         has sufficient space to write into.
         """
-        cdef start_line=VERTICAL_OVERSCAN_PX, end_line=SCREEN_HEIGHT_PX - VERTICAL_OVERSCAN_PX
-        cdef start_row=HORIZONTAL_OVERSCAN_PX, end_row=SCREEN_WIDTH_PX - HORIZONTAL_OVERSCAN_PX
+        cdef int start_line=VERTICAL_OVERSCAN_PX, end_line=SCREEN_HEIGHT_PX - VERTICAL_OVERSCAN_PX
+        cdef int start_row=HORIZONTAL_OVERSCAN_PX, end_row=SCREEN_WIDTH_PX - HORIZONTAL_OVERSCAN_PX
         if v_overscan:
             start_line = 0
             end_line = SCREEN_HEIGHT_PX
@@ -310,7 +309,7 @@ cdef class NESPPU:
         :param num_cycles: the number of PPU cycles (not cpu cycles!).
         :return: whether vblank started during the cycles run
         """
-        cdef int cyc
+        cdef int cyc=0
         cdef bint vblank_started=False
 
         for cyc in range(num_cycles):
@@ -369,7 +368,8 @@ cdef class NESPPU:
         """
         Render a pixel on a visible scanline (lines 0-239 inclusive)
         """
-        cdef int bkg_pixel, final_pixel, coarse_y, cmask, double_sprites, sprite_table
+        cdef int bkg_pixel=0, final_pixel=0, coarse_y=0, cmask=0, sprite_table=0
+        cdef bint double_sprites=False
 
         if 0 < self.pixel <= 256:  # pixels 1 - 256
             # render pixel - 1
@@ -458,11 +458,10 @@ cdef class NESPPU:
         # slightly complicated by the 30 (x 8px) row height of the screen, so if y >= 240, should bump it by 16 to
         # account for the fact that the attribute table has been crossed.
         self._effective_y = (self.ppu_scroll[PPU_SCROLL_Y] + (bit_high(self.ppu_ctrl, BIT_NAMETABLE_Y) << 8)) & 0x1FF
-        if self.ppu_scroll[PPU_SCROLL_Y] >= 240:
-            pass
-            #self._effective_y += 16
-        #if self.line==261:
-         #   print(self.line, self.pixel, self._effective_y, self.ppu_scroll[PPU_SCROLL_Y], bit_high(self.ppu_ctrl, BIT_NAMETABLE_Y))
+        # it is actually valid to set the y scroll to between 240 and 256, will cause attriute table to be read as
+        # nametable data; used in some places to do "negative y-scroll"
+        #if self.ppu_scroll[PPU_SCROLL_Y] >= 240:
+        #   self._effective_y += 16
 
 
     ################ Sprite decoding and rendering #####################################################################
@@ -472,14 +471,14 @@ cdef class NESPPU:
         Non cycle-correct detector for active sprites on the given line.  Returns a list of the indices of the start
         address of the sprite in the OAM
         """
-        cdef int double_sprites, sprite_height, n, addr, sprite_y
+        cdef int n=0, addr=0, sprite_y=0
         cdef list sprite_line
 
         # scan through the sprites, starting at oam_start_addr, seeing if they are visible in the line given
         # (note that should be the next line); if so, add them to the list of active sprites, until that gets full.
         # if using 8x16 sprites (True), or 8x8 sprite (False)
-        double_sprites = (self.ppu_ctrl & SPRITE_SIZE_MASK) > 0
-        sprite_height = 16 if double_sprites else 8
+        cdef bint double_sprites = (self.ppu_ctrl & SPRITE_SIZE_MASK) > 0
+        cdef int sprite_height = 16 if double_sprites else 8
 
         self._num_active_sprites = 0
         for n in range(64):
@@ -503,10 +502,10 @@ cdef class NESPPU:
         """
         Non cycle-correct way to pre-fetch the sprite lines for the next scanline
         """
-        cdef int table_base, prev_table_base, palette_ix, attribs, flip_v, flip_h, tile_ix, line, tile_base, x, c
+        cdef int table_base=0, prev_table_base=0, palette_ix=0, attribs=0, flip_v=0, flip_h=0, tile_ix=0, line=0, tile_base=0, x=0, c=0
         cdef int palette[4]
-        cdef unsigned char sprite_pattern_lo, sprite_pattern_hi
-        cdef int i, address
+        cdef unsigned char sprite_pattern_lo=0, sprite_pattern_hi=0
+        cdef int i=0, address=0
 
         # previously the ppu was fetching background tiles, so address line A12 was set by the bkg table base; this is
         # used for triggering irq ticks for MMC3 type cartridges.
@@ -570,8 +569,8 @@ cdef class NESPPU:
         """
         Cycle-correct (ish) sprite rendering for the pixel at y=line, pixel=pixel.  Includes sprite 0 collision detection.
         """
-        cdef int sprite_c_out, c
-        cdef int top_sprite, sprite_addr, sprite_x, pix, s0_visible=False
+        cdef int sprite_c_out=0, c=0, top_sprite=0, sprite_addr=0, sprite_x=0, pix=0
+        cdef bint s0_visible=False
 
         c_out = bkg_pixel
         if (self.ppu_mask & RENDER_SPRITES_MASK) == 0 \
@@ -615,9 +614,9 @@ cdef class NESPPU:
         Fill the ppu's rendering latches with the next tile to be rendered.  Relies on the correct values in
         the internal _effective_x and _effective_y variables.
         """
-        cdef int ntbl_base, tile_addr, tile_line, tile_index, tile_bank, tile_base
-        cdef int i, shift, palette_id, table_base, attr_addr
-        cdef unsigned char attribute_byte, mask
+        cdef int ntbl_base=0, tile_addr=0, tile_line=0, tile_index=0, tile_bank=0, tile_base=0
+        cdef int i=0, shift=0, palette_id=0, table_base=0, attr_addr=0
+        cdef unsigned char attribute_byte=0, mask=0
 
         # which nametable are we currently on?
         ntbl_base = (NAMETABLE_START                                  # nametable start
@@ -675,7 +674,7 @@ cdef class NESPPU:
         Determine the current background pixel to draw based on the current internal state of the PPU
         :return:
         """
-        cdef int fine_x, px, v, mask
+        cdef int fine_x=0, px=0, v=0, mask=0
 
         if (   self.ppu_mask & RENDER_BACKGROUND_MASK) == 0 \
             or (self.pixel - 1 < 8 and bit_low(self.ppu_mask, RENDER_LEFT8_BKG_BIT)):
@@ -696,7 +695,7 @@ cdef class NESPPU:
         Invalidates the entire palette cache; could be more efficient by only invalidating entries that have been
         rewritten.
         """
-        cdef int i
+        cdef int i=0
         for i in range(8):
             self._palette_cache_valid[i] = False
 
@@ -748,9 +747,9 @@ cdef class NESPPU:
         Reads the nametable and attribute table and then sends the result of that for each
         tile on the screen to render_tile to actually render the tile (reading the pattern tables, etc.)
         """
-        cdef int nx, ny, nametable, addr_base, row, vblock, v_subblock_ix, col, tile_index, hblock, h_subblock_ix, shift
-        cdef int mask, palette_id, tile_bank, x, y, x0, xe, y0, ye
-        cdef unsigned char attribute_byte
+        cdef int nx=0, ny=0, nametable=0, addr_base=0, row=0, vblock=0, v_subblock_ix=0, col=0, tile_index=0, hblock=0, h_subblock_ix=0, shift=0
+        cdef int mask=0, palette_id=0, tile_bank=0, x=0, y=0, x0=0, xe=0, y0=0, ye=0
+        cdef unsigned char attribute_byte=0
 
         dest[:, :] = self.get_background_color()
 
@@ -815,7 +814,7 @@ cdef class NESPPU:
         using the palette supplied.  Transparent pixels (value 0 in the tile) are replaced with self.transparent_color.
         This makes them ready to be blitted to the screen.
         """
-        cdef int x, y, xx, yy, pixel_color_ix, plane, table_base, tile_base
+        cdef int x=0, y=0, xx=0, yy=0, pixel_color_ix=0, plane=0, table_base=0, tile_base=0
         cdef int palette[4]
 
         if palette_id > 0:

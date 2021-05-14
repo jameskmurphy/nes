@@ -1,24 +1,32 @@
-import pyximport; pyximport.install()
+# cython: profile=True, boundscheck=True, nonecheck=False, language_level=3
 
+#import pyximport; pyximport.install()
+
+# sync modes that are available, each with advantages and disadvantages
+SYNC_NONE = 0  # no sync: runs very fast, unplayable, music is choppy
+SYNC_AUDIO = 1  # sync to audio: rate is perfect, can glitch sometimes, screen tearing can be bad
+SYNC_PYGAME = 2  # sync to pygame's clock, adaptive audio: generally reliable, some screen tearing
+SYNC_VSYNC = 3  # sync to external vsync, adaptive audio: requires ~60Hz vsync, no tearing
 
 import logging
-from nes.cycore.system import NES
+from nes import NES
+from nes.pycore.system import NES as pyNES
 from tests.blargg_tests import run_tests
-from nes import LOG_CPU, LOG_PPU
 
 #run_tests()
 
 nes = None
 
 # Mapper 0
-#nes = NES("./roms/Super Mario Bros. (Japan, USA).nes", log_file="./logs/nes.log", log_level=logging.INFO)
+nes = NES("./roms/Super Mario Bros. (Japan, USA).nes", sync_mode=SYNC_AUDIO, opengl=True)
+#nes = pyNES("./roms/Super Mario Bros. (Japan, USA).nes")
 #nes = NES("./roms/Balloon_fight.nes", log_file="./logs/nes.log", log_level=logging.INFO)
 #nes = NES("./roms/donkey kong.nes", log_file="./logs/nes.log", log_level=logging.INFO)
 #nes = NES("./roms/Ice Climber.nes", log_file="./logs/nes.log", log_level=logging.INFO)
 
 # Mapper 2
-#nes = NES("./roms/Mega Man (USA).nes", log_file="./logs/nes.log", log_level=logging.INFO)
-#nes = NES("./roms/DuckTales (USA).nes", log_file="./logs/nes.log", log_level=logging.INFO)
+#nes = NES("./roms/Mega Man (USA).nes", log_file="./logs/nes.log", log_level=logging.INFO, sync_mode=SYNC_VSYNC, opengl=True)
+#nes = NES("./roms/DuckTales (USA).nes")#, log_file="./logs/nes.log", log_level=logging.INFO)
 
 # Mapper 1
 #nes = NES("./roms/Silk Worm (USA).nes", log_file="./logs/nes.log", log_level=logging.INFO)
@@ -30,18 +38,19 @@ nes = None
 #nes = NES("./roms/Genghis Khan (USA).nes", log_file="./logs/nes.log", log_level=logging.INFO)
 
 # Mapper 4 (MMC3)
-#nes = NES("./roms/Super Mario Bros. 3 (USA).nes", log_file="./logs/nes.log", log_level=logging.INFO)
+#nes = NES("./roms/Super Mario Bros. 3 (USA).nes", log_file="./logs/nes.log", log_level=logging.INFO, show_nametables=False, palette_file="./palettes/Wavebeam.pal")
 #nes = NES("./roms/Double Dragon III - The Sacred Stones (USA).nes", log_file="./logs/nes.log", log_level=logging.INFO)
 #nes = NES("./roms/Bubble Bobble Part 2 (USA).nes", log_file="./logs/nes.log", log_level=logging.INFO)
 #nes = NES("./roms/Gauntlet (USA).nes", log_file="./logs/nes.log", log_level=logging.INFO)
 #nes = NES("./roms/Mega Man 3 (USA).nes", log_file="./logs/nes.log", log_level=logging.INFO)
 #nes = NES("./roms/Jurassic Park (USA).nes", log_file="./logs/nes.log", log_level=logging.INFO)
 
-#nes = NES("./roms/Gun Nac (USA).nes", log_file="./logs/nes.log", log_level=logging.INFO)
-nes = NES("./roms/Gun Nac (U).nes", log_file="./logs/nes.log", log_level=logging.INFO)
+#nes = NES("./roms/Gun Nac (USA).nes", log_file="./logs/nes.log", log_level=logging.INFO, show_nametables=True)
+#nes = NES("./roms/Gun Nac (U).nes", log_file="./logs/nes.log", log_level=logging.INFO, show_nametables=True)
 #nes = NES("./roms/Bucky O'Hare (USA).nes", log_file="./logs/nes.log", log_level=logging.INFO)
 #nes = NES("./roms/Teenage Mutant Ninja Turtles III - The Manhattan Project (USA).nes", log_file="./logs/nes.log", log_level=logging.INFO)
 #nes = NES("./roms/Tiny Toon Adventures (USA).nes", log_file="./logs/nes.log", log_level=logging.INFO)
+#nes = NES("./roms/Battletoads (USA).nes", log_file="./logs/nes.log", log_level=logging.INFO)
 
 
 # Test ROMS
@@ -116,6 +125,13 @@ nes = NES("./roms/Gun Nac (U).nes", log_file="./logs/nes.log", log_level=logging
 # not sure
 # nes = NES("./testroms/test_apu_timers/square_pitch.nes", log_file="./logs/nes.log", log_level=logging.INFO)
 # nes = NES("./testroms/test_apu_timers/triangle_pitch.nes", log_file="./logs/nes.log", log_level=logging.INFO)
+
+
+#nes.run_frame_headless(run_frames=1)
+#nes.run_frame_headless(run_frames=1)
+#buffer = nes.run_frame_headless(run_frames=1)
+
+
 
 
 if nes is not None:

@@ -1,6 +1,6 @@
 import logging
 
-from nes import LOG_MEMORY
+#from nes import LOG_MEMORY
 
 
 OAM_SIZE_BYTES = 256

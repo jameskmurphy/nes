@@ -39,9 +39,6 @@ class NESCart0(CartBase):
 
         # initialize prg rom from supplied data  (CPU connected)
         self.prg_rom = bytearray(prg_rom_data)
-        for i, v in enumerate(self.prg_rom):
-            print(i, v)
-
 
         if len(self.prg_rom) not in [16 * 1024, 32 * 1024]:
             raise ValueError("Cart 0 prg rom size should be 16 or 32kB")

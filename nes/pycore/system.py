@@ -1,14 +1,14 @@
 import pyximport; pyximport.install()
 
-#from .pycore.mos6502 import MOS6502
-from .cycore.mos6502 import MOS6502
-#from .pycore.memory import NESMappedRAM
-from .cycore.memory import NESMappedRAM
-#from .pycore..ppu import NESPPU
-from .cycore.ppu import NESPPU
-from .rom import ROM
-from .peripherals import Screen, KeyboardController, ControllerBase
-from nes import LOG_CPU, LOG_PPU, LOG_MEMORY
+from nes.pycore.mos6502 import MOS6502
+#from .cycore.mos6502 import MOS6502
+from nes.pycore.memory import NESMappedRAM
+#from .cycore.memory import NESMappedRAM
+from nes.pycore.ppu import NESPPU
+#from .cycore.ppu import NESPPU
+from nes.rom import ROM
+from nes.peripherals import Screen, KeyboardController, ControllerBase
+#from nes import LOG_CPU, LOG_PPU, LOG_MEMORY
 import pickle
 
 import logging
@@ -60,7 +60,7 @@ class NES:
         # set up the logger
         self.init_logging(log_file, log_level)
 
-        rom = ROM(rom_file)
+        rom = ROM(rom_file, py_compatibility_mode=True)
 
         # the cartridge is a piece of hardware (unlike the ROM, which is just data) and must come first because it
         # supplies bits of hardware (memory in most cases, both ROM and potentially RAM) all over the system, so it
@@ -77,7 +77,8 @@ class NES:
         self.ppu = NESPPU(cart=self.cart, interrupt_listener=self.interrupt_listener)
 
         # screen needs to have the PPU
-        self.screen = Screen(ppu=self.ppu, scale=screen_scale)
+        self.screen = Screen(ppu=self.ppu, scale=screen_scale, py_compatibility_mode=True)
+        self.ppu.screen = self.screen
         self.screen_scale = screen_scale
 
         # due to memory mapping, lots of things are connected to the main memory

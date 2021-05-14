@@ -1,15 +1,17 @@
 from setuptools import setup, Extension, find_packages
 from Cython.Build import cythonize
+import Cython.Compiler.Options
+Cython.Compiler.Options.annotate = True
 
 extensions = [Extension("cycore.*", ["nes/cycore/*.pyx"])]
-extensions = cythonize(extensions, compiler_directives={"language_level": 3})
+extensions = cythonize(extensions, compiler_directives={"language_level": 3, "profile": False, "boundscheck": False, "nonecheck": False, "cdivision": True}, annotate=True)
 
 with open("README.md", "r") as fh:
     long_description = fh.read()
 
 setup(
     name="pyntendo",
-    version="0.0.6",
+    version="0.0.8",
     author="James Murphy",
     author_email="jkmurphy314@gmail.com",
     description="A Nintendo Entertainment System (NES) emulator in Python and Cython",

@@ -32,14 +32,8 @@ Improvements
 
 ### Emulator Improvements
 
-* Fully headless operation
-  * take input keypresses
-  * output frame bitmap, audio
 * ALE sytle interface
   * Find lives, score counters, start point for a few games
-* ~~pip installable~~
-  * ~~make pyaudio optional (=> no sound)~~
-  * make pygame optional (=> headless only)
 * Debug features
   * (made tricky by pygame one window limit)
   * ~~nametable viewer~~

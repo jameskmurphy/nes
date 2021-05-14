@@ -1,6 +1,7 @@
 import pyximport; pyximport.install()
 
 from .cycore.carts import NESCart0, NESCart1, NESCart2, NESCart4
+from nes.pycore.carts import NESCart0 as pyNESCart0
 from .pycore.bitwise import upper_nibble, lower_nibble, bit_low, bit_high
 
 class ROM:
@@ -22,7 +23,9 @@ class ROM:
     MIRROR_VERTICAL = [0, 1, 0, 1]
     MIRROR_FOUR_SCREEN = [0, 1, 2, 3]
 
-    def __init__(self, filename, verbose=True):
+    def __init__(self, filename, verbose=True, py_compatibility_mode=False):
+        self.py_compatibility_mode = py_compatibility_mode
+
         self.prg_rom_bytes = None
         self.chr_rom_bytes = None
         self.mirror_pattern = None
@@ -134,6 +137,15 @@ class ROM:
         """
         Get the correct type of cartridge object from this ROM, ready to be plugged into the NES system
         """
+        if self.py_compatibility_mode:
+            if self.mapper_id==0:
+                return pyNESCart0(prg_rom_data=self.prg_rom_data,
+                                chr_rom_data=self.chr_rom_data,
+                                nametable_mirror_pattern=self.mirror_pattern,
+                                )
+            else:
+                print("Mapper {} not currently supported in py_compatibility_mode".format(self.mapper_id))
+
         if self.mapper_id == 0:
             return NESCart0(prg_rom_data=self.prg_rom_data,
                             chr_rom_data=self.chr_rom_data,

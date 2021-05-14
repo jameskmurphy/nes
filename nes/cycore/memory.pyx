@@ -1,4 +1,3 @@
-# cython: profile=True, boundscheck=True, nonecheck=False, language_level=3
 #import pyximport; pyximport.install()
 
 from .system cimport OAM_DMA
@@ -109,8 +108,6 @@ cdef class NESMappedRAM(MemoryBase):
         :param page:
         :return:
         """
-        #logging.debug("OAM DMA from page {:02X}".format(page), extra={"source": "mem"})
-
         # done in two parts to correctly account for wrapping at page end
         cdef unsigned char data_block[OAM_SIZE_BYTES]
         cdef int i, addr_base, oam_addr

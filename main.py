@@ -1,15 +1,5 @@
-# cython: profile=True, boundscheck=True, nonecheck=False, language_level=3
-
-#import pyximport; pyximport.install()
-
-# sync modes that are available, each with advantages and disadvantages
-SYNC_NONE = 0  # no sync: runs very fast, unplayable, music is choppy
-SYNC_AUDIO = 1  # sync to audio: rate is perfect, can glitch sometimes, screen tearing can be bad
-SYNC_PYGAME = 2  # sync to pygame's clock, adaptive audio: generally reliable, some screen tearing
-SYNC_VSYNC = 3  # sync to external vsync, adaptive audio: requires ~60Hz vsync, no tearing
-
 import logging
-from nes import NES
+from nes import NES, SYNC_AUDIO, SYNC_NONE, SYNC_PYGAME, SYNC_VSYNC
 from nes.pycore.system import NES as pyNES
 from tests.blargg_tests import run_tests
 
@@ -19,7 +9,6 @@ nes = None
 
 # Mapper 0
 nes = NES("./roms/Super Mario Bros. (Japan, USA).nes", sync_mode=SYNC_AUDIO, opengl=True)
-#nes = pyNES("./roms/Super Mario Bros. (Japan, USA).nes")
 #nes = NES("./roms/Balloon_fight.nes", log_file="./logs/nes.log", log_level=logging.INFO)
 #nes = NES("./roms/donkey kong.nes", log_file="./logs/nes.log", log_level=logging.INFO)
 #nes = NES("./roms/Ice Climber.nes", log_file="./logs/nes.log", log_level=logging.INFO)
@@ -54,7 +43,6 @@ nes = NES("./roms/Super Mario Bros. (Japan, USA).nes", sync_mode=SYNC_AUDIO, ope
 
 
 # Test ROMS
-
 
 #nes = NES("./testroms/nes-test-roms-master/mmc3_test/1-clocking.nes", log_file="./logs/nes.log", log_level=logging.INFO)
 #nes = NES("./testroms/nes-test-roms-master/mmc3_test/2-details.nes", log_file="./logs/nes.log", log_level=logging.INFO)
@@ -130,6 +118,9 @@ nes = NES("./roms/Super Mario Bros. (Japan, USA).nes", sync_mode=SYNC_AUDIO, ope
 #nes.run_frame_headless(run_frames=1)
 #nes.run_frame_headless(run_frames=1)
 #buffer = nes.run_frame_headless(run_frames=1)
+
+#python version:
+#nes = pyNES("./roms/Super Mario Bros. (Japan, USA).nes")
 
 
 
